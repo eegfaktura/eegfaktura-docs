@@ -1,0 +1,94 @@
+site_name: eegfaktura Documentation
+site_description: Developer + Maintainer documentation for the eegfaktura energy community billing platform
+site_url: https://gemeinstrom.github.io/eegfaktura-docs/
+repo_url: https://github.com/gemeinstrom/eegfaktura-docs
+repo_name: gemeinstrom/eegfaktura-docs
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Architecture:
+      - architecture/index.md
+      - Service Overview: architecture/overview.md
+      - Authentication: architecture/auth.md
+      - Databases: architecture/databases.md
+      - Messaging: architecture/messaging.md
+      - Deployment: architecture/deployment.md
+  - Services:
+      - services/index.md
+      - Backend Layer:
+          - services/backend.md
+          - services/billing.md
+          - services/energystore.md
+          - services/filestore.md
+          - services/eda-xp.md
+          - services/eda-mock.md
+          - services/admin-backend.md
+      - Frontend Layer:
+          - services/web.md
+          - services/admin-web.md
+      - Platform Layer:
+          - services/keycloak.md
+          - services/postgres.md
+          - services/mosquitto.md
+          - services/mailpit.md
+          - services/billing-cert-rotator.md
+  - Operations:
+      - operations/index.md
+      - Provisioning Pipeline: operations/pipeline.md
+  - Reference:
+      - reference/index.md
+      - Glossary: reference/glossary.md
+      - OBIS Codes: reference/obis-codes.md
