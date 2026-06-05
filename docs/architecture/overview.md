@@ -1,6 +1,6 @@
 # Service Overview
 
-The eegfaktura platform is a microservice stack that manages member master data, ingests energy data from Austrian network operators, allocates that energy to community members by a per-period participation factor, and produces the resulting billing documents.
+The eegfaktura platform is a microservice stack that manages member master data, drives the EDA lifecycle of members and metering points (register, activate, deactivate, change participation factor), and ingests the per-period allocations computed by the Austrian network operator. The network operator owns the allocation math — eegfaktura stores the resulting values and uses them to produce billing documents.
 
 ## Service topology
 
@@ -108,15 +108,34 @@ Stateful dependencies, deployed alongside the application services.
 
 See [Messaging](messaging.md) for the full inbound pipeline.
 
-### Admin runs the monthly billing
+### Admin runs the period billing
+
+The billing period is configurable per EEG — monthly, quarterly, biannual, or yearly (see `base.eeg.billing_period`). The same flow runs once per chosen period.
 
 1. **admin-web** or **web** (with `EEG_ADMIN` group) calls **billing** to create a preview.
-2. billing reads energy data from **energystore** and master data from **backend** (or the database directly, depending on the call).
-3. billing computes `verbrauchertarif × G.03` and `erzeugertarif × (G.01T − P.01T)` per metering point.
+2. billing reads the network-operator-allocated values from **energystore** and master data from **backend** (or the database directly, depending on the call).
+3. billing applies `verbrauchertarif × G.03` and `erzeugertarif × (G.01T − P.01T)` per metering point.
 4. Preview documents are stored, member-readable via **filestore**.
 5. Admin triggers the **final billing** action; the run becomes immutable.
 
 See [reference/obis-codes](../reference/obis-codes.md) for the energy-data semantics, and [services/billing](../services/billing.md) for the run state machine.
+
+### Member-/Zählpunkt-lifecycle operations
+
+Most day-to-day admin work in the customer SPA triggers an EDA process against the network operator. These are asynchronous — the local state moves to an intermediate "requested" state immediately, and the final state is set when the operator's response arrives via the [inbound pipeline](messaging.md).
+
+| UI action | EDA process | Effect |
+|-----------|-------------|--------|
+| Add member + Zählpunkt | (no EDA) | `base.participant` + `base.metering_point` row, status `NEW` |
+| Activate Zählpunkt | `EC_REQ_ONL` | `NEW` → `ACTIVATED`; later `ACTIVE` on operator response |
+| Deactivate Zählpunkt | `EC_REQ_OFF` | `ACTIVE` → inactive on operator response |
+| Change participation factor | `EC_REQ_PRZ` | factor change takes effect on the next operator-confirmed day; allowed only Mon-Fri 09:00–17:00 |
+| Request energy data | `EC_REQ_ENE` | operator delivers per-period values (G.01 / G.02 / G.03 etc.) via `ENERGY_FILE_RESPONSE` |
+| Request participant list | `EC_REQ_LST` | reconciles the operator-side list of who is in this EEG |
+
+Inbound (operator-initiated) flows include revocations (`CM_REV_SP`, `CM_REV_IMP`, `CM_REV_CUS`) which move a metering point to `REVOKED` without local action.
+
+See [services/backend](../services/backend.md#eda-subscriptions) for the subscription-and-handler mapping.
 
 ## Cross-cutting concerns
 

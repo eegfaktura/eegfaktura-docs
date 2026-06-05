@@ -16,7 +16,7 @@ Go service that stores per-period energy time-series and answers report queries.
 
 - Subscribe to MQTT energy-data topic, decode `MqttEnergyMessage`, persist to Badger
 - Serve per-period reports (consumption / production / EEG share) to the customer SPA and billing
-- Compute / pass through the `AllocDynamicV2` allocation
+- Serve the network-operator's allocation values via the `AllocDynamicV2` pass-through (energystore does not compute allocations — see below)
 - Register new metering points with the correct direction (consumer vs producer) on first publish
 
 ## Storage shape

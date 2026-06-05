@@ -7,9 +7,9 @@ Developer and maintainer documentation for the **eegfaktura** software suite —
 A microservice-based platform that:
 
 - Manages **member master data** of energy communities (participants, metering points, contracts)
-- **Imports energy data** from Austrian network operators via the **EDA** (Energie Daten Austausch) protocol
-- **Allocates energy** to community members using a per-period sharing factor (Teilnahmefaktor)
-- **Generates billing documents** based on consumption / production / surplus per period
+- Drives the **EDA-protocol lifecycle** of members and metering points: register, activate, deactivate, change participation factor, request energy data, request participant list
+- **Imports energy data** from Austrian network operators via the **EDA** (Energie Daten Austausch) protocol — the network operator performs the per-period allocation by Teilnahmefaktor; eegfaktura stores the resulting values
+- **Generates billing documents** based on the allocated consumption / production / surplus per period
 - Provides **customer-facing UIs** for members and a **maintenance UI** for community administrators
 
 ## Documentation map

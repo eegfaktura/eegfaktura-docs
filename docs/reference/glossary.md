@@ -40,8 +40,8 @@ Domain terms used throughout the documentation.
 
 **Tarif** — Tariff. Three types:
 - `EEG` — annual member fee, fixed per person
-- `VZP` — consumer Zählpunkt tariff, monthly, applied as ct/kWh × G.03
-- `EZP` — producer Zählpunkt tariff, monthly, applied as ct/kWh × (G.01T − P.01T)
+- `VZP` — consumer Zählpunkt tariff, applied as ct/kWh × G.03 per billing period
+- `EZP` — producer Zählpunkt tariff, applied as ct/kWh × (G.01T − P.01T) per billing period
 
 **Teilnahmefaktor** (participation factor) — Percentage (0..100) per metering point per EEG. Determines the share of the metering point's consumption / production attributed to this EEG. A metering point can be in up to 5 EEGs; the sum of participation factors must not exceed 100. Default 100% for metering points activated before 2024-04-08. Changes are only allowed Mon-Fri 09:00–17:00 and take effect the next day.
 
