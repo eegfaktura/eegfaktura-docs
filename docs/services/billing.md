@@ -120,7 +120,7 @@ These are managed in the admin UI ("Abrechnungseinstellungen") and stored alongs
 
 ## Tenant convention
 
-In some deployments `base.eeg.tenant == base.eeg.rc_number`; in others they diverge (e.g. `tenant=TEST_EEG_001`, `rc_number=TE100200`). Billing's tenant check is sensitive to this. Provisioning should keep `tenant` and `rc_number` aligned where possible.
+In some deployments `base.eeg.tenant == base.eeg.rc_number`; in others they diverge (e.g. `tenant=<TENANT_ID>`, `rc_number=<RC_NUMBER>`). Billing's tenant check is sensitive to this. Provisioning should keep `tenant` and `rc_number` aligned where possible.
 
 ## Config
 
