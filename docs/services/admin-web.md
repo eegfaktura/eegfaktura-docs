@@ -99,7 +99,7 @@ All routes go to admin-backend.
 
 ## Build and image
 
-- Source: an `eegfaktura-admin-web` or similar repo (historically `eeg-registration-frontend` / `vfeeg-admin-web`)
+- Source: `eegfaktura-admin-web` (historically `eeg-registration-frontend` → `vfeeg-admin-web` → `eegfaktura-admin-web`; the public AGPL fork formerly at that name was archived in 2026-06 — see the `eegfaktura-admin-web-archived-2026-06` tombstone repo)
 - Build: React build → static bundle → Caddy image
 - Runtime: Caddy
 
