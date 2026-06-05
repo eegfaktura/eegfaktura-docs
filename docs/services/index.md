@@ -38,4 +38,4 @@ Each service page covers:
 - **[mailpit](mailpit.md)** — SMTP catcher (dev)
 - **[billing-cert-rotator](billing-cert-rotator.md)** — JWT signing cert rotation
 
-> **Note:** This index lists the services as currently deployed. Individual service pages are being written as part of the documentation rollout — pages marked `(stub)` are placeholders pending content.
+> **Note:** This index lists the services as currently deployed. Per-service pages cover responsibilities, APIs, configuration, auth, database access, and inter-service dependencies.
