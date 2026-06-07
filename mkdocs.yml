@@ -72,6 +72,7 @@ nav:
           - services/backend.md
           - services/billing.md
           - services/energystore.md
+          - services/energystore-v2.md
           - services/filestore.md
           - services/eda-xp.md
           - services/eda-mock.md

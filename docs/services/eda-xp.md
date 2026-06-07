@@ -84,15 +84,74 @@ Owns conversation state in the `eda` schema. Tables (approximate):
 
 The `MessageStorage` actor reads prior state on merge. If the conversation-id does not match a prior outbound (e.g. a partner-initiated message), the merge produces an enriched message with empty prior context — the backend handler then deals with the unenriched case.
 
-## MQTT topic
+## MQTT output
+
+eda-xp publishes on two topic families:
+
+### EDA workflow events (cleartext JSON)
 
 ```
 eda/<tenant>/protocol/<process_lower>
+eda/response/<tenant>/protocol/<process_lower>
 ```
 
-`<tenant>` is the EEG's `community_id`. `<process_lower>` is the process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
+`<tenant>` is the EEG's `community_id`. `<process_lower>` is the process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, `cr_req_pt`, etc.
 
-Payload is `EbMsMessage` serialized as JSON via circe.
+Payload is `EbMsMessage` serialized as JSON via circe — cleartext, no encryption.
+
+### CR_MSG (energy data — ENCRYPTED)
+
+```
+eda/response/<tenant>/protocol/cr_msg
+eda/response/<tenant>/protocol/inverter_msg
+```
+
+`cr_msg` (network-operator data response — contains per-meter, per-slot energy values) is **encrypted**. `inverter_msg` (PV inverter telemetry) is cleartext.
+
+Subscribers: [energystore (v1)](energystore.md) and [energystore-v2](energystore-v2.md).
+
+### CR_MSG payload encryption
+
+Reverse-engineered from the production binary 2026-06-07 (full analysis in `eegfaktura-platform#169`). The producer-side encryption happens in `at.energydash.mqtt.MqttSystem.encryptAES256` (Scala). The consumer-side decrypt is `at.ourproject/energystore/mqttclient.decryptAES256CBC` (Go).
+
+Pipeline:
+
+```
+EbMsMessage.asJson.noSpaces.getBytes(UTF_8)
+  ↓
+gzip                                     ← Pre-encrypt compression
+  ↓
+AES-256-CBC + PKCS#5 (=PKCS#7) padding   ← hardcoded static key + static IV
+  ↓
+Base64.getEncoder.encodeToString         ← MQTT-safe transport
+  ↓
+MQTT publish
+```
+
+Cryptographic parameters (hardcoded in **both** binaries):
+
+| | |
+|---|---|
+| Algorithm | AES-256-CBC + PKCS#5/PKCS#7 padding |
+| Key length | 32 bytes (256-bit) |
+| IV length | 16 bytes (AES block size) |
+| Pre-compression | gzip |
+| Transport encoding | Base64 (standard, no URL-safe variant) |
+| Scope | **only** the `cr_msg` topic — all other `eda/response/*/protocol/*` traffic is cleartext |
+
+The cleartext-vs-cipher decision is a runtime check `if protocol == "CR_MSG"` in the Scala publisher.
+
+#### Architecture status
+
+The encryption layer is currently a Defense-in-Depth measure for an isolated cluster (private MQTT, no external exposure, RBAC-restricted pod access). It is not the primary protection for the PII contained in `cr_msg` payloads. See [platform issue #170](https://github.com/gemeinstrom/eegfaktura-platform/issues/170) for the architecture discussion (keep, modernise, or remove?). The current static-key design has these known caveats:
+
+- Same key everywhere in the binary — anyone with image read access can extract it (verified, ~10 minutes via `strings`)
+- Static IV with AES-CBC is deterministic — repeated plaintext prefixes produce repeated ciphertext prefixes
+- Only `cr_msg` is protected; other PII-bearing topics flow in cleartext
+
+When the source is published under AGPL §13, the static key becomes public information and the encryption is no longer effective even as Defense-in-Depth. That deadline is the practical trigger for the architecture decision.
+
+The [energystore-v2](energystore-v2.md) Decrypt module is env-configurable and ships **without** the prod key embedded — see [`ESV2_MQTT_DECRYPT_KEY_HEX`](energystore-v2.md#optional-payload-decrypt).
 
 ## Config
 
@@ -107,7 +166,7 @@ Payload is `EbMsMessage` serialized as JSON via circe.
 
 - Source: an `eegfaktura-eda-comm` repo (or `energycash-eda-comm` historically)
 - Build: sbt + JDK 17 + sbt 1.7.x; `JavaAppPackaging` produces the runtime image
-- Final image size is substantial (Scala runtime + scalaxb-generated classes); ~580 MiB is typical
+- Final image is substantially larger than the Go services (Scala runtime + scalaxb-generated classes for every supported EDA protocol version)
 
 ## When PONTON is not deployed
 

@@ -33,3 +33,4 @@ If you are…
 - Examples use generic placeholders: `<eeg-domain>` for the public domain, `<tenant-id>` for the EEG community ID, `<namespace>` for the Kubernetes namespace.
 - Service-internal DNS uses Kubernetes service-name patterns: `<service>.<namespace>.svc.cluster.local`.
 - JWT claims are documented with the exact claim name as emitted by Keycloak.
+- These docs focus on **how things connect** — architecture, schemas, protocols, code-level gotchas. Production sizing, resource consumption, and operational tuning live in ADRs (`eegfaktura-platform/docs/adr/`) and per-cluster Helm values, not here.

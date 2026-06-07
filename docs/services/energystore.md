@@ -1,4 +1,9 @@
-# energystore
+# energystore (v1)
+
+!!! warning "Two implementations in active use"
+    This page describes **energystore v1**, the embedded-Badger implementation that runs in production today. A parallel **[energystore-v2](energystore-v2.md)** based on TimescaleDB is live in the pilot cluster and is the planned cutover target. See ADR-0010 in the `eegfaktura-platform` repo for the architectural decision and [energystore-v2](energystore-v2.md) for the v2-specific design.
+
+    v1 will continue to exist as the production binary until the cutover is finalised. The two implementations share the same wire-format expectations from the EDA pipeline; storage layer and report APIs differ.
 
 Go service that stores per-period energy time-series and answers report queries. Backed by an embedded Badger KV store on a PVC, not by PostgreSQL.
 
@@ -11,6 +16,8 @@ Go service that stores per-period energy time-series and answers report queries.
 | Bus | MQTT subscriber |
 | Auth | JWT verify, `X-Tenant` header check |
 | Per-EEG bucket | one logical bucket per EEG `tenant` |
+| Replicas | Single (BadgerDB lock + RWO PVC) |
+| Source repo | proprietary VFEEG fork `at.ourproject/energystore` — **NOT** the public AGPL `eegfaktura/eegfaktura-energystore` (RE'd 2026-06-07, see platform#169) |
 
 ## Responsibilities
 
@@ -37,7 +44,15 @@ Each slot stores values per quarter-hour for the configured time range. There is
 
 ## MQTT input
 
-Subscribes to `eegfaktura/<tenant>/energy/<meterId>`. The payload is JSON:
+!!! note "Production topic and payload differ from the README"
+    The legacy README documented `eegfaktura/<tenant>/energy/<meterId>` with a plain-JSON payload. The actual production subscription pattern, as observed in the `eegfaktura-energystore-config` ConfigMap and confirmed by binary RE 2026-06-07, is:
+
+    - **Topic**: `eda/response/+/protocol/cr_msg` (energy data) and `eda/response/+/protocol/inverter_msg` (PV inverter)
+    - **Payload**: **AES-256-CBC + gzip + base64**, *not* plain JSON. The producer ([eda-xp](eda-xp.md)) encrypts the per-message JSON; energystore decrypts via a hardcoded static key+IV before the JSON parse.
+
+    The plain-JSON pattern below describes the **logical** payload after decryption. See [eda-xp.md](eda-xp.md#cr_msg-payload-encryption) for the encryption details and `platform#169` / `platform#170` for the full analysis and architecture discussion.
+
+After decryption + decompression the payload is JSON:
 
 ```json
 {
@@ -99,7 +114,7 @@ Badger persists to `/data`, mounted from a PVC. The PVC is the single source of 
 - Wipe-replay of the namespace destroys this data; restore requires a PVC snapshot or re-import via EDA.
 - The PVC is RWO (single-writer). energystore is a single-replica deployment.
 
-In production instances the PVC is large (hundreds of GiB). Plan for it in cluster sizing.
+The PVC dominates the storage footprint for the namespace.
 
 ## Config
 
@@ -118,16 +133,18 @@ In production instances the PVC is large (hundreds of GiB). Plan for it in clust
 
 The build image should not be shipped as the runtime image. The image-size and CVE-surface impact of using the Go builder image directly is significant. Multi-stage distroless is the convention.
 
-## Sizing
+## Known limitations (drove the v2 design)
 
-The energystore pod is historically one of the largest in the stack:
+- **No multi-replica scaling**: BadgerDB embedded + ReadWriteOnce-PVC technically prevent running more than one replica.
+- **Full-range read-modify-write per EDA-message**: an incoming CR_MSG triggers reading the entire time range from disk, merging, and writing back — produces large RAM and CPU spikes under load.
+- **In-process tenant lock**: a `Turns.lock(tenant)` mutex serialises all EDA processing per tenant, capping throughput.
+- **Selective MQTT encryption**: only `CR_MSG` is encrypted (statically), other MQTT topics flow in cleartext. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption).
 
-- Idle RAM is dominated by Badger's table cache; scales with the data size.
-- CPU is light at idle, can spike when serving large reports.
-- PVC growth is roughly linear in `(meters × time × codes)`. A small EEG might fit in 10 GiB; a large one needs hundreds of GiB.
+These points are the explicit motivation for [energystore-v2](energystore-v2.md). See ADR-0010 in `eegfaktura-platform` for the architecture justification.
 
 ## Related
 
+- **[energystore-v2](energystore-v2.md)** — the TimescaleDB-based replacement
 - [Architecture / Messaging](../architecture/messaging.md) — energy-data MQTT pipeline
 - [Architecture / Databases](../architecture/databases.md) — energystore vs PG split
 - [reference/obis-codes](../reference/obis-codes.md) — code → slot table

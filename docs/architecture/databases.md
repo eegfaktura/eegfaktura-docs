@@ -1,11 +1,16 @@
 # Databases
 
-eegfaktura runs against a single PostgreSQL cluster. Most application state lives in one logical database with **one schema per service**. Keycloak has its own database. Time-series energy data does **not** live in PostgreSQL — it is stored by **energystore** in an embedded Badger KV store on a persistent volume.
+eegfaktura runs against **one or two PostgreSQL clusters**, depending on whether [energystore-v2](../services/energystore-v2.md) is deployed:
+
+- **`postgres`** — master data, Keycloak, optional Ponton adapter. Always present.
+- **`postgres-energy`** — TimescaleDB-backed time-series for energystore-v2. Present in pilot and planned for production cutover.
+
+For the v1 stack only the first cluster exists; energystore v1 stores time-series in an **embedded Badger KV store on a persistent volume**, not in PostgreSQL.
 
 ## Logical layout
 
 ```
-PostgreSQL cluster
+postgres cluster (master data)
 ├── <main-database>
 │   ├── base       — backend (Go): participants, EEGs, metering points, contracts, tariffs
 │   ├── eda        — backend (Go) + eda-xp: EDA message storage, process history
@@ -13,9 +18,23 @@ PostgreSQL cluster
 │   └── filestore  — filestore (Python): file metadata + blobs (or filesystem refs)
 ├── keycloak       — Keycloak identity data
 └── pontonxp       — Ponton adapter state (if a real network-operator link is wired)
+
+postgres-energy cluster (energystore-v2 only; TimescaleDB)
+└── energystore
+    ├── energy_data         — hypertable, hash-partitioned on tenant_id
+    └── counterpoint_meta   — per-meter metadata
 ```
 
 The exact main-database name is environment-specific (e.g. `eegfaktura`). Service config uses an env var (`DB_NAME` / equivalent) rather than hard-coding.
+
+## Why a separate cluster for time-series
+
+The split is captured in ADR-0010 (`eegfaktura-platform`). Conceptually:
+
+- **Access patterns** are different: time-series ingest is high-volume write of small rows with no joins; OLTP master data has lower volume with rich joins. Sharing one cluster forces trade-offs that fit neither workload.
+- **Operational independence**: a long-running aggregate query on time-series data should not impact master-data OLTP latency, and vice versa.
+
+The `energy_data` table is a TimescaleDB **hypertable** with hash partitioning on `tenant_id`. New rows for a given tenant fall in one bucket; bucket count is chosen so that concurrent tenant writes spread across buckets. See the [postgres-energy section in the postgres service page](../services/postgres.md#postgres-energy-timescaledb-energystore-v2-only) for the architectural decisions; concrete tuning lives in the per-cluster Helm overlay.
 
 ## Schema ownership
 
@@ -88,7 +107,7 @@ Important: `tenant` and `community_id` may or may not be equal. In some legacy s
 
 ### `base.processhistory`
 
-Append-only log of every interaction (UI action, EDA inbound, billing event). In production deployments this table grows large (tens of GB in long-running instances). Pagination matters; do not `SELECT *` without filters.
+Append-only log of every interaction (UI action, EDA inbound, billing event). This table grows continuously with platform activity; queries must be filtered (do not `SELECT *` without a `date`/`tenant` predicate).
 
 ### `eda.*`
 

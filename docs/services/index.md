@@ -19,7 +19,8 @@ Each service page covers:
 
 - **[backend](backend.md)** (Go) — master data: participants, metering points, EEGs, contracts
 - **[billing](billing.md)** (Java/Spring) — billing document generation, tariff application
-- **[energystore](energystore.md)** (Go + Badger) — energy data storage and per-period reports
+- **[energystore](energystore.md)** (Go + Badger) — energy data storage and per-period reports (production today)
+- **[energystore-v2](energystore-v2.md)** (Go + TimescaleDB) — pilot, planned cutover target
 - **[filestore](filestore.md)** (Python) — file storage and download endpoints
 - **[eda-xp](eda-xp.md)** (Scala/Pekko) — EDA protocol gateway for network operator communication
 - **[eda-mock](eda-mock.md)** (Scala) — EDA mock for development / testing

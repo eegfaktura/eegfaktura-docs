@@ -2,6 +2,11 @@
 
 PostgreSQL cluster. Hosts the main application database (multiple schemas), the Keycloak database, and optionally a PONTON-adapter database.
 
+!!! info "A second Postgres cluster for time-series data"
+    With [energystore-v2](energystore-v2.md) in the pilot, there is a separate **`postgres-energy`** Postgres cluster with the **TimescaleDB extension** that holds energy time-series only. The main `postgres` cluster documented on this page continues to hold master data (`base`, `eda`, `billingj`, `filestore`).
+
+    The split is deliberate (ADR-0010 in the platform repo): time-series ingest has fundamentally different access patterns from OLTP master data, and TimescaleDB's hash-partitioning + compression match the time-series workload.
+
 ## At a glance
 
 | | |
@@ -62,11 +67,20 @@ The `db-schema` Job in `eegfaktura-bootstrap`:
 
 This Job is intentionally idempotent — a failed attempt that left a partially-created schema can be re-run. The `DROP SCHEMA IF EXISTS` step was added explicitly because earlier Job attempts could leave the schema half-created on the first failure, causing all subsequent retries to fail with `relation already exists`.
 
-## PVC and sizing
+## Persistence
 
-PostgreSQL uses a RWO PVC. In production this PVC is large (450 GiB in historical instances), dominated by `base.processhistory` (tens of GB / hundreds of millions of rows over the years).
+PostgreSQL uses a RWO PVC. `base.processhistory` and the `eda.*` workflow tables grow with EDA traffic; `base.processhistory` has no retention policy yet — see [eegfaktura-backend issue #105](https://github.com/gemeinstrom/eegfaktura-backend/issues/105) for the partitioning + retention plan. Wipe-replay destroys the PVC along with the namespace.
 
-Wipe-replay destroys the PVC along with the namespace.
+## postgres-energy (TimescaleDB, energystore-v2 only)
+
+A separate Postgres deployment hosts the TimescaleDB-backed time-series data for [energystore-v2](energystore-v2.md). Architectural choices:
+
+- **Hash-partitioned hypertable** on `tenant_id` for multi-tenant write isolation.
+- **Compression policy** on chunks past a configurable age.
+- **Continuous aggregates** for the hourly / daily / monthly rollups that settlement queries consume.
+- **pgBouncer** in front in production deployments.
+
+The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG (CNPG)** with primary + async read-replica + WAL-archive-to-S3. CNPG is referenced in `konzept.md` §4 but not yet deployed (see `feedback_cnpg_not_yet_in_stack`).
 
 ## Backups
 
