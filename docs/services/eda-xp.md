@@ -112,7 +112,7 @@ Subscribers: [energystore (v1)](energystore.md) and [energystore-v2](energystore
 
 ### CR_MSG payload encryption
 
-Reverse-engineered from the production binary 2026-06-07 (full analysis in `eegfaktura-platform#169`). The producer-side encryption happens in `at.energydash.mqtt.MqttSystem.encryptAES256` (Scala). The consumer-side decrypt is `at.ourproject/energystore/mqttclient.decryptAES256CBC` (Go).
+The producer-side encryption happens in `at.energydash.mqtt.MqttSystem.encryptAES256` (Scala). The consumer-side decrypt is `at.ourproject/energystore/mqttclient.decryptAES256CBC` (Go).
 
 Pipeline:
 
@@ -145,7 +145,7 @@ The cleartext-vs-cipher decision is a runtime check `if protocol == "CR_MSG"` in
 
 The encryption layer is currently a Defense-in-Depth measure for an isolated cluster (private MQTT, no external exposure, RBAC-restricted pod access). It is not the primary protection for the PII contained in `cr_msg` payloads. See [platform issue #170](https://github.com/gemeinstrom/eegfaktura-platform/issues/170) for the architecture discussion (keep, modernise, or remove?). The current static-key design has these known caveats:
 
-- Same key everywhere in the binary — anyone with image read access can extract it (verified, ~10 minutes via `strings`)
+- Same key everywhere in the binary — anyone with image read access can extract it
 - Static IV with AES-CBC is deterministic — repeated plaintext prefixes produce repeated ciphertext prefixes
 - Only `cr_msg` is protected; other PII-bearing topics flow in cleartext
 
