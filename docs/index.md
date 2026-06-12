@@ -14,10 +14,10 @@ A microservice-based platform that:
 
 ## Documentation map
 
-- **[Architecture](architecture/)** — How services fit together. Service topology, authentication flow, databases, messaging, deployment patterns.
-- **[Services](services/)** — One page per deployed service. Responsibilities, APIs, configuration, secrets, image provenance.
-- **[Operations](operations/)** — Provisioning, wipe-replay, observability.
-- **[Reference](reference/)** — Glossary (OBIS, EDA, EEG terminology), reference tables.
+- **[Architecture](architecture/index.md)** — How services fit together. Service topology, authentication flow, databases, messaging, deployment patterns.
+- **[Services](services/index.md)** — One page per deployed service. Responsibilities, APIs, configuration, secrets, image provenance.
+- **[Operations](operations/index.md)** — Provisioning, wipe-replay, observability.
+- **[Reference](reference/index.md)** — Glossary (OBIS, EDA, EEG terminology), reference tables.
 
 ## Quick orientation
 

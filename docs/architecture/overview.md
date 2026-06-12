@@ -150,4 +150,4 @@ See [services/backend](../services/backend.md#eda-subscriptions) for the subscri
 
 Each service is its own repository. The platform repository (Helm charts, Argo manifests, provisioning pipeline) is a separate repository and orchestrates the deployment of all of them.
 
-Service-to-repository mapping is documented per service page under [Services](../services/).
+Service-to-repository mapping is documented per service page under [Services](../services/index.md).

@@ -112,46 +112,38 @@ Subscribers: [energystore (v1)](energystore.md) and [energystore-v2](energystore
 
 ### CR_MSG payload encryption
 
-The producer-side encryption happens in `at.energydash.mqtt.MqttSystem.encryptAES256` (Scala). The consumer-side decrypt is `at.ourproject/energystore/mqttclient.decryptAES256CBC` (Go).
-
-Pipeline:
+`cr_msg` payloads are wrapped in a symmetric encryption envelope before publishing. This is the canonical description of the wire format — other pages link here instead of repeating it.
 
 ```
-EbMsMessage.asJson.noSpaces.getBytes(UTF_8)
+EbMsMessage as JSON (UTF-8)
   ↓
-gzip                                     ← Pre-encrypt compression
+gzip                          ← pre-encrypt compression
   ↓
-AES-256-CBC + PKCS#5 (=PKCS#7) padding   ← hardcoded static key + static IV
+AES-256-CBC, PKCS#7 padding   ← pre-shared key + IV
   ↓
-Base64.getEncoder.encodeToString         ← MQTT-safe transport
+Base64 (standard alphabet)    ← MQTT-safe transport
   ↓
 MQTT publish
 ```
 
-Cryptographic parameters (hardcoded in **both** binaries):
+Wire-format parameters:
 
 | | |
 |---|---|
-| Algorithm | AES-256-CBC + PKCS#5/PKCS#7 padding |
+| Algorithm | AES-256-CBC with PKCS#5/PKCS#7 padding |
 | Key length | 32 bytes (256-bit) |
 | IV length | 16 bytes (AES block size) |
 | Pre-compression | gzip |
 | Transport encoding | Base64 (standard, no URL-safe variant) |
-| Scope | **only** the `cr_msg` topic — all other `eda/response/*/protocol/*` traffic is cleartext |
+| Scope | the `cr_msg` topic; other `eda/response/*/protocol/*` traffic is cleartext JSON |
 
-The cleartext-vs-cipher decision is a runtime check `if protocol == "CR_MSG"` in the Scala publisher.
+Subscribers reverse the pipeline: Base64-decode → AES-decrypt → gunzip → JSON parse. Key and IV are deployment-level shared parameters and are not part of the published source or documentation.
 
 #### Architecture status
 
-The encryption layer is currently a Defense-in-Depth measure for an isolated cluster (private MQTT, no external exposure, RBAC-restricted pod access). It is not the primary protection for the PII contained in `cr_msg` payloads. See [platform issue #170](https://github.com/gemeinstrom/eegfaktura-platform/issues/170) for the architecture discussion (keep, modernise, or remove?). The current static-key design has these known caveats:
+The envelope is a Defense-in-Depth measure for cluster-internal MQTT traffic. The long-term design of this layer (keep, modernise, or replace) is tracked in an internal architecture decision record in the platform repository.
 
-- Same key everywhere in the binary — anyone with image read access can extract it
-- Static IV with AES-CBC is deterministic — repeated plaintext prefixes produce repeated ciphertext prefixes
-- Only `cr_msg` is protected; other PII-bearing topics flow in cleartext
-
-When the source is published under AGPL §13, the static key becomes public information and the encryption is no longer effective even as Defense-in-Depth. That deadline is the practical trigger for the architecture decision.
-
-The [energystore-v2](energystore-v2.md) Decrypt module is env-configurable and ships **without** the prod key embedded — see [`ESV2_MQTT_DECRYPT_KEY_HEX`](energystore-v2.md#optional-payload-decrypt).
+The [energystore-v2](energystore-v2.md) decrypt module is env-configurable and ships **without** any key material — see [`ESV2_MQTT_DECRYPT_KEY_HEX`](energystore-v2.md#optional-payload-decrypt).
 
 ## Config
 

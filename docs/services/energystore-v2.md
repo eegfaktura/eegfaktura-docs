@@ -97,13 +97,13 @@ Subscribes (multi-replica capable) to:
 | `ESV2_MQTT_QOS` | `1` |
 
 !!! note "MQTT-5 Shared Subscriptions need paho.golang"
-    v2 uses `github.com/eclipse/paho.golang` (MQTT 5). An earlier attempt with `paho.mqtt.golang v1` (MQTT 3.1.1) failed: Mosquitto silently accepts `$share/…` subscribes from a 3.1.1 client but never matches a publish to them. See `feedback_paho_go_v1_shared_subscription` (internal note) and platform PR #37.
+    v2 uses `github.com/eclipse/paho.golang` (MQTT 5). An earlier attempt with `paho.mqtt.golang v1` (MQTT 3.1.1) failed: Mosquitto silently accepts `$share/…` subscribes from a 3.1.1 client but never matches a publish to them. See also the [mosquitto operational notes](mosquitto.md#mqtt-5-vs-311-shared-subscriptions-caveat).
 
     Also: MQTT 5 §4.8.2 forbids `NoLocal=true` on Shared Subscriptions — the v2 subscriber sets it to `false`. Earlier dev versions had `NoLocal=true` and were disconnected by Mosquitto with `reason_code=130 (Protocol Error)`.
 
 ### Optional payload decrypt
 
-The production v1 stack wraps `CR_MSG` payloads in AES-256-CBC + gzip + base64 with a hardcoded static key+IV (see [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption)). For drop-in compatibility v2 ships an optional pre-decode step, env-configurable:
+The production v1 stack wraps `cr_msg` payloads in an encrypted envelope — see [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format. For drop-in compatibility v2 ships an optional pre-decode step, env-configurable:
 
 | Env | Default | Effect |
 |---|---|---|
@@ -130,7 +130,7 @@ Explicit-but-wrong tenant always → 403 (no fallback past a wrong explicit valu
 
 REST surface mirrors v1's `/eeg/v2/{ecid}/...` endpoints with the same wire shape (intentional — the customer SPA was reused unchanged). GraphQL surface adds an `/query` endpoint with a tenant fallback consistent with REST.
 
-The `/excel/report/download` endpoint produces an XLSX with the v1-compatible sheet layout. See platform PR #34 for the wire-shape fixes that landed during the pilot rollout.
+The `/excel/report/download` endpoint produces an XLSX with the v1-compatible sheet layout; wire-shape compatibility with v1 was verified during the pilot rollout.
 
 ## Scaling note
 
@@ -140,8 +140,8 @@ The v2 app tier is stateless and intentionally lightweight: per-message work is 
 
 The v2 implementation is feature-complete for the cutover, but three open architecture decisions remain:
 
-1. **MQTT-payload encryption** — keep AES-CBC (v1 status quo), replace with proper crypto (per-tenant keys, AES-GCM, Vault), or remove entirely (cluster-internal traffic is already isolated). Discussion in platform issue #170.
-2. **`processhistory` retention** — backend audit table without a retention policy. Outside the energystore-v2 scope but related to the cutover (see [eegfaktura-backend issue #105](https://github.com/gemeinstrom/eegfaktura-backend/issues/105)).
+1. **MQTT-payload encryption** — keep the current envelope (v1 status quo), replace with proper crypto (per-tenant keys, AES-GCM, Vault), or remove entirely (cluster-internal traffic is already isolated). Tracked as an internal architecture decision.
+2. **`processhistory` retention** — backend audit table without a retention policy. Outside the energystore-v2 scope but related to the cutover (tracked in the backend repository).
 3. **Eventual ELWG-Q4-2026 alignment** — multi-participation, peer-to-peer contracts, self-supply across multiple meters. T-/R-OBIS variants already accepted (PR #39); deeper schema changes tracked as energystore-v2 issue #40.
 
 ## Related

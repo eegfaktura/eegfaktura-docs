@@ -17,7 +17,7 @@ Go service that stores per-period energy time-series and answers report queries.
 | Auth | JWT verify, `X-Tenant` header check |
 | Per-EEG bucket | one logical bucket per EEG `tenant` |
 | Replicas | Single (BadgerDB lock + RWO PVC) |
-| Source repo | proprietary VFEEG fork `at.ourproject/energystore` — **NOT** the public AGPL `eegfaktura/eegfaktura-energystore` (RE'd 2026-06-07, see platform#169) |
+| Source repo | `eegfaktura-energystore` |
 
 ## Responsibilities
 
@@ -45,12 +45,12 @@ Each slot stores values per quarter-hour for the configured time range. There is
 ## MQTT input
 
 !!! note "Production topic and payload differ from the README"
-    The legacy README documented `eegfaktura/<tenant>/energy/<meterId>` with a plain-JSON payload. The actual production subscription pattern, as observed in the `eegfaktura-energystore-config` ConfigMap and confirmed by binary RE 2026-06-07, is:
+    The legacy README documented `eegfaktura/<tenant>/energy/<meterId>` with a plain-JSON payload. The actual production subscription pattern, as configured in the `eegfaktura-energystore-config` ConfigMap, is:
 
     - **Topic**: `eda/response/+/protocol/cr_msg` (energy data) and `eda/response/+/protocol/inverter_msg` (PV inverter)
-    - **Payload**: **AES-256-CBC + gzip + base64**, *not* plain JSON. The producer ([eda-xp](eda-xp.md)) encrypts the per-message JSON; energystore decrypts via a hardcoded static key+IV before the JSON parse.
+    - **Payload**: an encrypted envelope, *not* plain JSON. The producer ([eda-xp](eda-xp.md)) wraps the per-message JSON; energystore unwraps it before the JSON parse — see [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format.
 
-    The plain-JSON pattern below describes the **logical** payload after decryption. See [eda-xp.md](eda-xp.md#cr_msg-payload-encryption) for the encryption details and `platform#169` / `platform#170` for the full analysis and architecture discussion.
+    The plain-JSON pattern below describes the **logical** payload after decryption.
 
 After decryption + decompression the payload is JSON:
 
@@ -138,7 +138,7 @@ The build image should not be shipped as the runtime image. The image-size and C
 - **No multi-replica scaling**: BadgerDB embedded + ReadWriteOnce-PVC technically prevent running more than one replica.
 - **Full-range read-modify-write per EDA-message**: an incoming CR_MSG triggers reading the entire time range from disk, merging, and writing back — produces large RAM and CPU spikes under load.
 - **In-process tenant lock**: a `Turns.lock(tenant)` mutex serialises all EDA processing per tenant, capping throughput.
-- **Selective MQTT encryption**: only `CR_MSG` is encrypted (statically), other MQTT topics flow in cleartext. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption).
+- **Topic-scoped payload encryption**: the encryption envelope applies to the `cr_msg` topic only. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption).
 
 These points are the explicit motivation for [energystore-v2](energystore-v2.md). See ADR-0010 in `eegfaktura-platform` for the architecture justification.
 

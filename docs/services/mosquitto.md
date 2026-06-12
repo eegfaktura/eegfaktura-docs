@@ -20,13 +20,13 @@ Eclipse Mosquitto MQTT broker. The platform's message bus, used for EDA inbound 
 | Topic (prod) | Publisher | Subscriber | Payload |
 |---|---|---|---|
 | `eda/<tenant>/protocol/<process_lower>` | eda-xp / eda-mock | backend | `EbMsMessage` (JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore | **AES-256-CBC + gzip + base64** envelope around `MqttEnergyMessage` JSON |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore | encrypted envelope around `MqttEnergyMessage` JSON ([wire format](eda-xp.md#cr_msg-payload-encryption)) |
 | `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore | plain JSON `MqttEnergyMessage` (PV inverter; not encrypted) |
 | `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | [energystore-v2](energystore-v2.md) | plain `MqttEnergyMessage` JSON (pilot convention) |
 
 `<tenant>` is the EEG's `community_id`. `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …).
 
-The `cr_msg` topic is the one carrying actual energy values per metering point, hence the encryption. The `cr_req_pt` topic (outbound period requests) is cleartext — request metadata only. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the full crypto pipeline.
+The `cr_msg` topic is the one carrying actual energy values per metering point, hence the encryption. The `cr_req_pt` topic (outbound period requests) is cleartext — request metadata only. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format.
 
 Subscriber-side details are documented per service: see [backend](backend.md) and [energystore](energystore.md).
 
