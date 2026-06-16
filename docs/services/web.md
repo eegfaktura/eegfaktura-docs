@@ -89,9 +89,11 @@ When provisioning a user, set the `tenant` attribute to the EEG's `community_id`
 ## Build and image
 
 - Source: `eegfaktura-web`
-- Build: Vite (or CRA in older revisions); produces a static `dist/`
+- Build: Vite; produces a static `dist/`
 - Runtime image: Caddy serving the static bundle
-- Tag scheme: SemVer
+- Tag scheme: source-commit SHA (`src-<7chars>`)
+- **Build Node version**: pin to `node:20-alpine`. `node:22-alpine` produced a vendor chunk that crashed at boot with `Object.defineProperty called on non-object` inside the `@oozcitak/dom` init graph (xmlbuilder2 dependency). Same source compiles cleanly under Node 20. The deeper root cause has not been isolated; the pin is the surgical workaround.
+- **`events` polyfill**: xmlbuilder2 imports the Node built-in `events`. Vite/Rollup since v3 do not polyfill Node built-ins automatically; the `events` npm package must be a direct dependency.
 
 ## Caddy security headers
 

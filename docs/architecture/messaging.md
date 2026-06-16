@@ -70,12 +70,13 @@ The backend hard-codes subscriptions for these protocols. Anything not in this l
 | `EC_REQ_ONL` | outbound | "Anmeldung Teilnahme Online" — Zählpunkt activation |
 | `EC_REQ_OFF` | outbound | Zählpunkt deactivation |
 | `EC_REQ_ENE` | outbound | Energy-data request |
-| `EC_REQ_PRZ` | outbound | Change participation factor |
+| `EC_PRTFACT_CHANGE` | bidirectional | Participation-factor change. Outbound `ANFORDERUNG_CPF`, inbound `ANTWORT_CPF` (accepted) or `ABLEHNUNG_CPF` (rejected). Grid operator only accepts requests Mon-Fri 09:00–17:00, effective the next day. |
 | `EC_REQ_LST` | outbound | Request participant list |
+| `EC_PODLIST` | inbound | Per-grid-operator metering-point list response |
 | `CM_REV_SP` | inbound | Revocation by service provider |
 | `CM_REV_IMP` | inbound | Revocation, import direction |
 | `CM_REV_CUS` | inbound | Revocation by customer |
-| `CR_MSG` | bidirectional | Generic notifications |
+| `CR_MSG` | bidirectional | Energy data (per-slot values) and generic notifications |
 | `CR_REQ_PT` | inbound | Participant-list response |
 
 Message codes inside an EDA message (e.g. `AUFHEBUNG_CCMS`, `ANTWORT_ECON`, `ONLINE_REG_COMPLETION`) determine the concrete state change. They are version-independent and matched in the backend handler with a `switch` on the message code.

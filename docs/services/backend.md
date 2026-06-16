@@ -38,7 +38,7 @@ Conventional endpoints:
 | `/eeg/v2/<ecId>/participants/<id>` | GET | self or EEG_ADMIN | one member |
 | `/eeg/v2/<ecId>/metering-points` | GET / POST | EEG_ADMIN | manage Zählpunkte |
 | `/eeg/v2/<ecId>/metering-points/<id>/activate` | POST | EEG_ADMIN | triggers `EC_REQ_ONL` |
-| `/eeg/v2/<ecId>/metering-points/<id>/participation-factor` | PATCH | EEG_ADMIN | triggers `EC_REQ_PRZ` |
+| `/api/meteringpoint/changepartitionfactor` | POST | EEG_ADMIN | bulk request: triggers `EC_PRTFACT_CHANGE` / `ANFORDERUNG_CPF` per grid operator |
 | `/eeg/v2/<ecId>/processhistory` | GET | EEG_ADMIN | paginated history |
 | `/health`, `/ready` | GET | none | k8s probes |
 
@@ -61,14 +61,29 @@ The MQTT subscription list is hard-coded at startup. Anything not in the list is
 
 | Protocol | Handler | Effect |
 |----------|---------|--------|
-| `CR_MSG` | `protocolCrMsgHandler` | generic notification |
+| `CR_MSG` | `protocolCrMsgHandler` | energy data + generic notifications; bridges per-slot values to the `eda/response/energy/<tenant>` topic for the energystore |
 | `CR_REQ_PT` | `protocolCrReqPtHandler` | participant-list response |
 | `EC_REQ_ONL` | `protocolEcReqOnlHandler` | Zählpunkt activation lifecycle |
 | `CM_REV_IMP` | `protocolCmRevImpHandler` | revocation, import direction |
 | `CM_REV_CUS` | `protocolCmRevImpHandler` | revocation by customer |
 | `CM_REV_SP` | `protocolCmRevImpHandler` | revocation by service provider |
+| `EC_PRTFACT_CHANGE` | `protocolEcPrtChangeHandler` | grid-operator response to a participation-factor change; three variants: `ANTWORT_CPF` (accepted, appends to `base.metering_partition_factor`), `ABLEHNUNG_CPF` (rejected, notification with response code), `ANFORDERUNG_CPF` (outbound echo, history only) |
+| `EC_PODLIST` | `protocolEcPodListHandler` | per-grid-operator metering-point list response |
 
 Handlers pattern-match on `MessageCode` (not version) and update `base.metering_point.status`, append to `base.processhistory`, and create notifications.
+
+### Outbound EDA caveats
+
+The grid operator validates inbound `ANFORDERUNG_*` payloads on receipt. Two recurring rejection causes:
+
+| Code | Meaning | Trigger |
+|------|---------|---------|
+| 70 | Akzeptiert | nominal success |
+| 82 | Prozessdatum falsch | request submitted outside Mon–Fri 09:00–17:00, or `DateActivate` not the next working day |
+| 90 | Kein Smart Meter | meter not eligible for the requested process |
+| 94 | Keine Daten im angeforderten Zeitraum vorhanden | requested period is empty for this meter |
+
+For `EC_PRTFACT_CHANGE` specifically the regulator only accepts requests during business hours and the change takes effect the following day. UI flows that trigger an `ANFORDERUNG_CPF` from outside the window will receive an `ABLEHNUNG_CPF` with code 82 even when the payload is otherwise correct.
 
 When adding support for a new EDA protocol or message code, the subscription list **and** the message-code switch inside the handler both need updating — see [Architecture / Messaging](../architecture/messaging.md) for the six gap points.
 

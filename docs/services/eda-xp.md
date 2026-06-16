@@ -64,8 +64,11 @@ When the customer SPA or backend triggers an EDA-flow (Zählpunkt activation, en
 | `EC_REQ_ONL` | Zählpunkt activation |
 | `EC_REQ_OFF` | Zählpunkt deactivation |
 | `EC_REQ_ENE` | Energy-data request |
-| `EC_REQ_PRZ` | Change participation factor |
+| `EC_PRTFACT_CHANGE` (MessageCode `ANFORDERUNG_CPF`) | Change participation factor |
 | `EC_REQ_LST` | Request participant list |
+| `EC_PODLIST` | Request per-grid-operator metering-point list |
+
+`EC_PRTFACT_CHANGE` is only accepted by the grid operator during business hours (Mon–Fri 09:00–17:00) and the change takes effect the following day. The XML helper sets `ProcessDate = today + 1` and `DateActivate = today + 1` by convention. Triggering outside that window returns an `ABLEHNUNG_CPF` with response code 82 (`Prozessdatum falsch`).
 
 ## XXE hardening
 
