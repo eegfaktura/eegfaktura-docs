@@ -65,6 +65,14 @@ The customer SPA addresses four backends with distinct conventions:
 
 Caddy in the customer-web container does **not** proxy these. The Ingress (typically NGINX with `rewrite-target: /$2`) handles the routing in cluster.
 
+## Runtime configuration
+
+The SPA fetches `/config/keycloak-config.json` at startup; Caddy serves it from `/srv` with template processing (keys `auth-server-url`, `realm`, `resource` — the `resource` is the client id `at.ourproject.vfeeg.app`). In cluster the file is overridden by a mounted ConfigMap.
+
+Backend service URLs are baked in at build time via `VITE_API_SERVER_URL`, `VITE_ENERGY_SERVER_URL`, `VITE_BILLING_SERVER_URL`, and `VITE_FILESTORE_SERVER_URL`.
+
+For local development, `pnpm run dev` starts Vite on port **5173** with proxies `/api`→9080, `/energystore`→9081, `/cash`→9095.
+
 ## Auth flow
 
 1. SPA loads from Caddy.
@@ -89,9 +97,10 @@ When provisioning a user, set the `tenant` attribute to the EEG's `community_id`
 ## Build and image
 
 - Source: `eegfaktura-web`
-- Build: Vite; produces a static `dist/`
-- Runtime image: Caddy serving the static bundle
-- Tag scheme: source-commit SHA (`src-<7chars>`)
+- Stack: React 18.2.0, `@ionic/react` + `@ionic/core` 7.x, Vite 5, TypeScript 5.1.6, React Router 5.3.4, Redux Toolkit, `oidc-client-ts` ^3.0.0 + `react-oidc-context` ^3.0.0, recharts ^2.10.3 (charts), i18next, react-hook-form. Package manager pnpm (CI pins 9.12.1). Node 20.18.0 (`.nvmrc`). Build-time i18n via `vite-plugin-i18next-loader`.
+- Build: Vite; produces a static `dist/`. The `build` npm script is `tsc && vite build`, but **CI runs `vite build` only** (skips `tsc`) because there are ~30 pre-existing TS errors; Vite transpiles without type-checking, so the bundle builds while `tsc` would fail.
+- Runtime image: Caddy 2.8.4 serving the static bundle on port **8080**, static `dist/` at `/var/www/html/vfeeg-web/`.
+- Tag scheme: `sha-<short>` (docker/metadata-action `type=sha,format=short,prefix=sha-`), plus `latest` on the default branch.
 - **Build Node version**: pin to `node:20-alpine`. `node:22-alpine` produced a vendor chunk that crashed at boot with `Object.defineProperty called on non-object` inside the `@oozcitak/dom` init graph (xmlbuilder2 dependency). Same source compiles cleanly under Node 20. The deeper root cause has not been isolated; the pin is the surgical workaround.
 - **`events` polyfill**: xmlbuilder2 imports the Node built-in `events`. Vite/Rollup since v3 do not polyfill Node built-ins automatically; the `events` npm package must be a direct dependency.
 

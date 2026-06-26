@@ -1,17 +1,19 @@
 # eda-xp
 
-Scala / Pekko service that bridges PONTON (the external EDA adapter) with the rest of the platform. Accepts inbound EDA XML over HTTP, parses it via scalaxb, enriches with stored conversation state, and republishes on MQTT for the backend to consume.
+Scala / Pekko service that bridges PONTON (the external EDA adapter) with the rest of the platform. Accepts inbound EDA XML over two transports — Ponton X/P (KEP) AS4 over HTTP and per-domain IMAP/SMTP email polling — parses it via scalaxb, enriches with stored conversation state, and republishes on MQTT for the backend to consume.
 
 ## At a glance
 
 | | |
 |---|---|
-| Language | Scala |
-| Framework | Pekko (formerly Akka) HTTP + actors |
-| Inbound | HTTP multipart upload from PONTON |
-| Outbound | MQTT publish to `eda/<tenant>/protocol/<process_lower>` |
-| State | PostgreSQL `eda` schema (conversation state) |
-| XML parsing | scalaxb (full per-namespace generation) |
+| Language | Scala 2.13.18 |
+| Framework | Apache Pekko 1.2.1 (HTTP 1.2.0 + actors, migrated from Akka 2026-06-13), Pekko Connectors MQTT, Pekko gRPC |
+| Inbound | (1) Ponton X/P (KEP) AS4 over HTTP — multipart upload to port 6090; (2) email IMAP/SMTP polling per-domain mailboxes |
+| Outbound | EDA XML POSTed to the Ponton X/P endpoint (`app.kepserver.url`); responses published to MQTT |
+| Ports | HTTP 6090 (Ponton multipart upload + admin), gRPC 9093 |
+| State | PostgreSQL `eda` schema (conversation state) via Slick + slick-pg, Flyway migrations |
+| XML parsing | scalaxb 1.12.0 (full per-namespace generation) |
+| Main class | `XpAdapter` |
 
 Also known as `eda-xp-connector` or `xp-adapter` in legacy configurations.
 
@@ -55,6 +57,26 @@ EDA distinguishes:
 
 Multiple supported versions exist in parallel. scalaxb-generated code is namespaced per (protocol, version) to keep them isolated. The shared "targeted hybrid" approach (single package for multiple namespaces) does not scale beyond a small set of XSDs; the convention is **full-per-namespace** generation with `scalaxbProtocolPackageName := Some("xmlprotocol")`.
 
+### Supported ebUtilities message schema versions
+
+Derived from `build.sbt` (scalaxb per-namespace bindings) and `XmlParseHandler.scala`:
+
+| Message type | Supported versions |
+|--------------|--------------------|
+| CMNotification | 01p11, 01p12, 01p20 |
+| CMRevoke | 01p00, 01p10 |
+| CMRequest (outbound) | 01p10, 01p20, 01p21, 01p30 |
+| CPNotification | 01p13 |
+| CPRequest / CPDocument | 01p12 |
+| ECMPList | 01p00, 01p10 |
+| ConsumptionRecord (CR_MSG) | 01p30, 01p40, 01p41 |
+| GCRequest | 01p00 |
+| CommonTypes | 01p20 |
+| Ponton KEP envelope | v320 |
+
+!!! note
+    There is **no** ConsumptionRecord 01p31 and **no** CR 01p20 in the code — do not assume they are supported.
+
 ## Outbound
 
 When the customer SPA or backend triggers an EDA-flow (Zählpunkt activation, energy-data request, participation-factor change), eda-xp generates the outbound XML and POSTs to PONTON. Outbound process codes used:
@@ -72,9 +94,9 @@ When the customer SPA or backend triggers an EDA-flow (Zählpunkt activation, en
 
 ## XXE hardening
 
-`scala.xml.XML.loadString` on attacker-controlled XML without XXE defenses is unsafe. scala-xml versions < 2.2 do not have secure-by-default parsing. Upgrade to scala-xml ≥ 2.2 (secure by default) **or** use a custom `XMLLoader` with `disallow-doctype-decl` set.
+`scala.xml.XML.loadString` on attacker-controlled XML without XXE defenses is unsafe: scala-xml versions < 2.2 do not have secure-by-default parsing. eda-xp uses **scala-xml 2.3.0**, which is secure by default (DOCTYPE declarations disallowed), so inbound XML parsing is XXE-hardened.
 
-This applies anywhere in eda-xp that consumes inbound XML.
+This protection applies anywhere in eda-xp that consumes inbound XML; keep scala-xml at ≥ 2.2 to retain it.
 
 ## Database
 
@@ -102,29 +124,27 @@ eda/response/<tenant>/protocol/<process_lower>
 
 Payload is `EbMsMessage` serialized as JSON via circe — cleartext, no encryption.
 
-### CR_MSG (energy data — ENCRYPTED)
+### CR_MSG (energy data — gzip + Base64)
 
 ```
 eda/response/<tenant>/protocol/cr_msg
 eda/response/<tenant>/protocol/inverter_msg
 ```
 
-`cr_msg` (network-operator data response — contains per-meter, per-slot energy values) is **encrypted**. `inverter_msg` (PV inverter telemetry) is cleartext.
+`cr_msg` (network-operator data response — contains per-meter, per-slot energy values) is the **only** topic that receives special encoding: the JSON is gzip-compressed then Base64-encoded (see below). It is **not** encrypted. `inverter_msg` (PV inverter telemetry) is cleartext.
 
 Subscribers: [energystore (v1)](energystore.md) and [energystore-v2](energystore-v2.md).
 
-### CR_MSG payload encryption
+### CR_MSG payload encoding
 
-`cr_msg` payloads are wrapped in a symmetric encryption envelope before publishing. This is the canonical description of the wire format — other pages link here instead of repeating it.
+`cr_msg` payloads are gzip-compressed and Base64-encoded before publishing. This is the canonical description of the wire format — other pages link here instead of repeating it.
 
 ```
 EbMsMessage as JSON (UTF-8)
   ↓
-gzip                          ← pre-encrypt compression
+gzip                          ← compression (java.util.zip.GZIPOutputStream)
   ↓
-AES-256-CBC, PKCS#7 padding   ← pre-shared key + IV
-  ↓
-Base64 (standard alphabet)    ← MQTT-safe transport
+Base64 (standard alphabet)    ← MQTT-safe transport (java.util.Base64.getEncoder)
   ↓
 MQTT publish
 ```
@@ -133,39 +153,54 @@ Wire-format parameters:
 
 | | |
 |---|---|
-| Algorithm | AES-256-CBC with PKCS#5/PKCS#7 padding |
-| Key length | 32 bytes (256-bit) |
-| IV length | 16 bytes (AES block size) |
-| Pre-compression | gzip |
-| Transport encoding | Base64 (standard, no URL-safe variant) |
-| Scope | the `cr_msg` topic; other `eda/response/*/protocol/*` traffic is cleartext JSON |
+| Compression | gzip |
+| Transport encoding | Base64 (standard alphabet, not URL-safe) |
+| Encryption | **none** |
+| Scope | the `cr_msg` topic only; every other `eda/response/*/protocol/*` topic is published as cleartext JSON (`case _ => value`) |
 
-Subscribers reverse the pipeline: Base64-decode → AES-decrypt → gunzip → JSON parse. Key and IV are deployment-level shared parameters and are not part of the published source or documentation.
+Subscribers reverse the pipeline: Base64-decode → gunzip → JSON parse.
+
+!!! warning "No encryption — despite the topic naming"
+    There is **no encryption** anywhere in eda-xp. In `MqttSystem.scala`, `eventToMqttMessage` carries the comment `// Todo: Encrypt and compress here`, but only the gzip + Base64 path for `CR_MSG` is implemented — there are zero references to AES, `Cipher`, or any encryption primitive in the source. Earlier revisions of this page described an AES-256-CBC envelope with a pre-shared key/IV; that was never implemented. Treat the wire format as gzip + Base64 obfuscation only, not a confidentiality control.
 
 #### Architecture status
 
-The envelope is a Defense-in-Depth measure for cluster-internal MQTT traffic. The long-term design of this layer (keep, modernise, or replace) is tracked in an internal architecture decision record in the platform repository.
+Encryption of cluster-internal MQTT traffic remains a TODO (see the source comment above), not an implemented Defense-in-Depth measure. The long-term design of this layer (implement, keep as-is, or replace) is tracked in an internal architecture decision record in the platform repository.
 
-The [energystore-v2](energystore-v2.md) decrypt module is env-configurable and ships **without** any key material — see [`ESV2_MQTT_DECRYPT_KEY_HEX`](energystore-v2.md#optional-payload-decrypt).
+The [energystore-v2](energystore-v2.md) decrypt module is env-configurable; because eda-xp publishes `cr_msg` as plain gzip+Base64, no key material is required to consume it.
 
 ## Config
 
-| Variable | Purpose |
-|----------|---------|
-| `DB_*` | PG connection (for `eda` schema) |
-| `MQTT_*` | broker connection |
-| `PONTON_*` | inbound + outbound PONTON endpoint config |
-| JVM heap | tune per environment |
+Configuration is layered: `reference.conf` (defaults) ← `application.conf` (mounted at `/conf`) ← environment overrides.
+
+| Key / variable | Purpose |
+|----------------|---------|
+| `app.interface.mode` | `SIMU` or `PROD` |
+| `app.kepserver.url` | outbound Ponton X/P endpoint |
+| `app.server.host` / `app.server.port` | HTTP server (port 6090) |
+| `app.grpc.host` / `app.grpc.port` | gRPC server (port 9093) |
+| `epmsmail.mail.*` | per-domain IMAP/SMTP mailbox config + poll interval |
+| `epmsmail.mqtt.host/port/sub-topic/qos/consumer-id` | MQTT broker connection |
+| `epmsmail.mqtt.topics.energyTopic/cmTopic/cpTopic/errorTopic` | response topic prefixes |
+| `epmsmail.admin.*` | admin notification SMTP |
+| `slick.pgsql.local.db.*` | PostgreSQL connection (for `eda` schema) |
+| `flyway.*` | DB migration settings |
+
+Common environment overrides: `SMTP_ADMIN_SERVER_HOST` / `SMTP_ADMIN_SERVER_PORT`, `EMAIL_ADMIN_USER`, `EMAIL_ADMIN_PWD`, `TZ`, `JAVA_OPTS`.
+
+Two volumes are mounted: `/conf` (holds `application.conf`) and `/storage/prod`.
 
 ## Build and image
 
-- Source: an `eegfaktura-eda-comm` repo (or `energycash-eda-comm` historically)
-- Build: sbt + JDK 17 + sbt 1.7.x; `JavaAppPackaging` produces the runtime image
-- Final image is substantially larger than the Go services (Scala runtime + scalaxb-generated classes for every supported EDA protocol version)
+- Build: sbt with `sbt-native-packager`
+- Docker image name `eegfaktura-kep`; base `eclipse-temurin:17-jre`; binary `xpadapter`; main class `XpAdapter`
+- Runtime defaults: `JAVA_OPTS=-Xmx4g`, `TZ=Europe/Vienna`
+- Key libraries: scalaxb 1.12.0 (per-namespace XML binding), Courier 3.0.1 (mail), Slick 3.5.1 + slick-pg, Flyway 10.20.0, Circe 0.14.3, scala-xml 2.3.0 (XXE-safe by default), PostgreSQL JDBC 42.7.3, Logback
+- Final image is substantially larger than the Go services (JRE + scalaxb-generated classes for every supported EDA protocol version)
 
 ## When PONTON is not deployed
 
-In environments without a real PONTON link (dev / mock instances), the [eda-mock](eda-mock.md) service stubs the PONTON side and the customer SPA's "Messages" menu is hidden.
+In environments without a real PONTON link (dev / mock instances), an [eda-mock](eda-mock.md) placeholder stands in for the PONTON side and the customer SPA's "Messages" menu is hidden. Note the currently deployed `eda-mock` is a `traefik/whoami` placeholder rather than a functional EDA stub — see that page for details.
 
 ## Related
 

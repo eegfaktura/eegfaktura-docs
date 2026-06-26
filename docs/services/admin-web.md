@@ -6,9 +6,10 @@ VFEEG maintenance UI. Cross-tenant administrative tool for the operating team. T
 
 | | |
 |---|---|
-| Language | TypeScript |
-| Framework | React (React-Admin) |
-| Server | Caddy |
+| Language | TypeScript 4.9.5 (strict) |
+| Framework | React 18.2.0, built with Create React App (react-scripts 5.0.1) |
+| UI | Material-UI (MUI) 5.14.0 + @mui/x-data-grid 6.20.4 + @emotion |
+| Server | Caddy (port 8080; dev server on 3000) |
 | Auth | OIDC, `vfeeg-superuser` group required |
 | Backends consumed | admin-backend (primary), backend (some endpoints) |
 
@@ -100,8 +101,12 @@ All routes go to admin-backend.
 ## Build and image
 
 - Source: `eegfaktura-admin-web` (historically `eeg-registration-frontend` → `vfeeg-admin-web` → `eegfaktura-admin-web`; the public AGPL fork formerly at that name was archived in 2026-06 — see the `eegfaktura-admin-web-archived-2026-06` tombstone repo)
-- Build: React build → static bundle → Caddy image
-- Runtime: Caddy
+- Stack: React 18.2.0 + TypeScript 4.9.5 (strict), Create React App (react-scripts 5.0.1). UI is MUI 5.14.0 + @mui/x-data-grid 6.20.4 + @emotion. Forms: react-hook-form 7.45.1 + yup. State: Redux Toolkit 1.9.5 + zustand 5.0.3. Routing: react-router-dom 6.14.1. Also lodash, moment, xlsx (Excel upload), swiper, @maskito, sass.
+- Package manager: **npm**. CI runs `npm install` (not `npm ci`) because the committed lockfile is out of sync with `package.json`.
+- Build: `npm run build` (CRA → `build/`) → static bundle → Caddy image, served on port **8080**. CI sets **`TSC_COMPILE_ON_ERROR=true`** to bypass pre-existing TypeScript type errors inherited from prod v0.2.15 (the JS still compiles via babel; only the strict ForkTsChecker under `CI=true` would otherwise make them fatal). Context: ~16 files were restored from prod-image sourcemaps and are now committed.
+- Image: `ghcr.io/vfeeg-development/eeg-registration-frontend` (legacy name kept).
+- Runtime config: fetched at startup from `/config/keycloak-config.json` (Caddy serves it via a templated handler). Uses client_id `at.ourproject.vfeeg.admin`, realm `EEGFaktura`; OIDC via oidc-client-ts 2.2.4 + react-oidc-context 2.2.2 (keycloak-js 22 also present), user store = sessionStorage. Backend endpoint comes from `REACT_APP_ADMIN_SERVER_URL` (default `/admin`).
+- Dev proxy (`setupProxy.js`): `/admin` → 8085 (admin-backend), `/api` → 9080 (backend), `/cash` → 9090 (billing).
 
 ## Caddy security headers
 

@@ -14,7 +14,7 @@ flowchart LR
   subgraph Backend
     BE[backend<br/>Go]
     BI[billing<br/>Java/Spring]
-    ES[energystore<br/>Go + Badger]
+    ES[energystore<br/>Go + BadgerDB]
     FS[filestore<br/>Python]
     EX[eda-xp<br/>Scala/Pekko]
     EM[eda-mock<br/>Scala]
@@ -49,7 +49,7 @@ flowchart LR
 
 ## Service tiers
 
-The 14 services in a typical instance group into three tiers.
+The local stack defines **13 services** (see `docker-compose.yaml`), grouped into three tiers below. The `eda-mock` stub is listed for completeness but is **not** part of the standard compose stack — the stack runs the real eda-xp connector (`eegfaktura-kep`).
 
 ### Backend layer — domain APIs
 
@@ -59,10 +59,10 @@ Each backend owns a slice of domain logic and exposes a REST API consumed by the
 |---------|----------|------|--------|
 | **backend** | Go | Master data: participants, metering points (Zählpunkte), EEGs, contracts, tariffs | [services/backend.md](../services/backend.md) |
 | **billing** | Java / Spring | Billing document generation, tariff application, billing-run state | [services/billing.md](../services/billing.md) |
-| **energystore** | Go + Badger | Energy time-series storage and per-period reports | [services/energystore.md](../services/energystore.md) |
+| **energystore** | Go + BadgerDB | Energy time-series storage and per-period reports | [services/energystore.md](../services/energystore.md) |
 | **filestore** | Python | Document storage and download endpoints | [services/filestore.md](../services/filestore.md) |
 | **eda-xp** | Scala / Pekko | EDA protocol gateway (network operator communication) | [services/eda-xp.md](../services/eda-xp.md) |
-| **eda-mock** | Scala | EDA stub for environments without a real network-operator link | [services/eda-mock.md](../services/eda-mock.md) |
+| **eda-mock** _(not in compose stack)_ | Scala | EDA stub for environments without a real network-operator link | [services/eda-mock.md](../services/eda-mock.md) |
 | **admin-backend** | Scala / Pekko | VFEEG-superuser maintenance API | [services/admin-backend.md](../services/admin-backend.md) |
 
 ### Frontend layer — SPAs
@@ -81,10 +81,13 @@ Stateful dependencies, deployed alongside the application services.
 | Service | Role | Detail |
 |---------|------|--------|
 | **keycloak** | OIDC identity provider, single realm `EEGFaktura` | [services/keycloak.md](../services/keycloak.md) |
-| **postgres** | Relational database; one logical DB, multiple schemas | [services/postgres.md](../services/postgres.md) |
+| **postgres** | Relational database (custom image); one `eegfaktura` DB with multiple schemas plus a separate `keycloak` DB | [services/postgres.md](../services/postgres.md) |
 | **mosquitto** | MQTT broker for EDA inbound messages and energy data | [services/mosquitto.md](../services/mosquitto.md) |
-| **mailpit** | SMTP catcher for non-production environments | [services/mailpit.md](../services/mailpit.md) |
-| **billing-cert-rotator** | Refetches Keycloak's JWT signing cert for billing | [services/billing-cert-rotator.md](../services/billing-cert-rotator.md) |
+| **postfix** | Mail relay (forwards to an external SMTP relay host) | [services/postfix.md](../services/postfix.md) |
+| **proxy** | Caddy reverse proxy (host ports 8001 customer SPA / 8002 admin SPA) | [services/proxy.md](../services/proxy.md) |
+
+!!! note "billing-cert-rotator is platform-only"
+    The **billing-cert-rotator** (refetches Keycloak's JWT signing cert for billing) is a platform/Kubernetes-only component. It is **not** part of the local docker-compose stack and is not in the billing repo.
 
 ## Request flow examples
 
@@ -144,10 +147,9 @@ See [services/backend](../services/backend.md#eda-subscriptions) for the subscri
 | Authentication | Keycloak realm + per-service JWT verification | [Authentication](auth.md) |
 | Database access | One PostgreSQL cluster, schema per service | [Databases](databases.md) |
 | Messaging | Mosquitto MQTT, EDA-inbound pipeline | [Messaging](messaging.md) |
-| Deployment | Helm charts + Argo CD (services) + Helm-managed bootstrap chart (data) | [Deployment](deployment.md) |
 
 ## Source repositories
 
-Each service is its own repository. The platform repository (Helm charts, Argo manifests, provisioning pipeline) is a separate repository and orchestrates the deployment of all of them.
+Each service is its own repository. The platform repository (`eegfaktura-platform`) is a separate repository that holds the deployment manifests and tooling for all of them.
 
 Service-to-repository mapping is documented per service page under [Services](../services/index.md).

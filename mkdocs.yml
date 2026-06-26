@@ -1,8 +1,8 @@
 site_name: eegfaktura Documentation
 site_description: Developer + Maintainer documentation for the eegfaktura energy community billing platform
-site_url: https://gemeinstrom.github.io/eegfaktura-docs/
-repo_url: https://github.com/gemeinstrom/eegfaktura-docs
-repo_name: gemeinstrom/eegfaktura-docs
+site_url: https://eegfaktura.github.io/eegfaktura-docs/
+repo_url: https://github.com/eegfaktura/eegfaktura-docs
+repo_name: eegfaktura/eegfaktura-docs
 edit_uri: edit/main/docs/
 
 theme:
@@ -65,7 +65,6 @@ nav:
       - Authentication: architecture/auth.md
       - Databases: architecture/databases.md
       - Messaging: architecture/messaging.md
-      - Deployment: architecture/deployment.md
   - Services:
       - services/index.md
       - Backend Layer:
@@ -86,9 +85,6 @@ nav:
           - services/mosquitto.md
           - services/mailpit.md
           - services/billing-cert-rotator.md
-  - Operations:
-      - operations/index.md
-      - Provisioning Pipeline: operations/pipeline.md
   - Reference:
       - reference/index.md
       - Glossary: reference/glossary.md

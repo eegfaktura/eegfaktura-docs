@@ -99,11 +99,7 @@ Domain terms used throughout the documentation.
 
 ## Infrastructure
 
-**Argo CD** — GitOps tool that reconciles Kubernetes manifests from a Git repository. Manages all eegfaktura service workloads.
-
 **Badger** — Embedded KV store used by energystore. Persists to a local volume.
-
-**Bootstrap chart** — Helm chart `eegfaktura-bootstrap`. Holds the one-shot Jobs that seed schema, realm, users, sample data. Helm-managed, not Argo-managed.
 
 **Mosquitto** — Eclipse Mosquitto MQTT broker. The message bus for EDA inbound and energy-data ingestion.
 

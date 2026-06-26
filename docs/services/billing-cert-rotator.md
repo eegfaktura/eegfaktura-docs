@@ -1,15 +1,18 @@
 # billing-cert-rotator
 
-A small periodic Job (or CronJob) that fetches Keycloak's current RS256 signing certificate, converts it to the PEM form that [billing](billing.md) expects, and refreshes the mounted `ConfigMap`.
+!!! note "Separate platform component"
+    The cert-rotator is **not** part of the billing service source. It is a platform-level CronJob defined in the deployment repo at `eegfaktura-platform/k8s/82-billing-cert-rotator.yaml`. There is no rotator code, `@Scheduled` task, or CronJob inside the `eegfaktura-billing` repo. The details below are grounded in that manifest.
+
+A small CronJob (plus a one-shot bootstrap `Job`) that fetches Keycloak's current RS256 signing certificate, converts it to the PEM form that [billing](billing.md) expects, refreshes the mounted `ConfigMap` `eegfaktura-jwt-cert`, and triggers a billing rollout.
 
 ## At a glance
 
 | | |
 |---|---|
-| Kind | CronJob (typical) or one-shot Job at deploy time |
-| Schedule | weekly, or aligned with the Keycloak key-rotation cadence |
-| Image | small base (alpine + curl + jq + openssl) or a purpose-built image |
-| State | none |
+| Kind | CronJob (recurring) + one-shot bootstrap `Job` at deploy time |
+| Schedule | daily, `30 3 * * *`, `timeZone: Europe/Vienna` |
+| Image | `alpine/k8s:1.34.0` (ships `kubectl` + `curl` + `sh`; PEM extraction via `sed`/`grep`, no `jq`) |
+| State | none (idempotent; only acts when the cert changed) |
 
 ## Why it exists
 
@@ -19,40 +22,50 @@ billing-cert-rotator closes that loop by re-deriving the file from Keycloak's cu
 
 ## What it does
 
+The script (`rotate.sh`, mounted from the `billing-cert-rotator-script` ConfigMap) fetches the JWKS, extracts `x5c[0]` of the RS256/`sig` key and wraps it as a PEM. The image has no `jq`, so extraction is done with `sed`/`grep`:
+
 ```sh
-curl -s https://<auth-domain>/realms/<realm>/protocol/openid-connect/certs \
-  | jq -r '.keys[] | select(.alg=="RS256" and .use=="sig") | .x5c[0]' \
-  | sed 's/\(.\{64\}\)/\1\n/g' \
-  | sed '1i-----BEGIN CERTIFICATE-----' \
-  | sed '$a-----END CERTIFICATE-----' \
-  > zertifikat-pub.pem
+JWKS=$(curl -sS --max-time 15 "$KC_URL/realms/$REALM/protocol/openid-connect/certs")
+
+X5C=$(printf '%s' "$JWKS" | tr -d '\n\r' \
+  | sed 's/},{/}\n{/g' \
+  | grep '"alg":"RS256"' \
+  | grep '"use":"sig"' \
+  | head -1 \
+  | sed -n 's/.*"x5c"[[:space:]]*:[[:space:]]*\["\([^"]*\)".*/\1/p')
+
+# fold to 64-char lines, wrap with BEGIN/END CERTIFICATE -> zertifikat-pub.pem
 ```
 
 Then:
 
-1. Apply the result as a `ConfigMap` (`eegfaktura-jwt-cert` or similar).
-2. Trigger a billing-pod rollout so the new cert is picked up.
+1. Compare the new PEM against the existing `eegfaktura-jwt-cert` ConfigMap. **If unchanged, exit (no-op).**
+2. If changed (or the ConfigMap is missing), apply it via `kubectl create configmap --dry-run=client -o yaml | kubectl apply -f -`.
+3. Trigger `kubectl rollout restart deploy/eegfaktura-billing` so the new cert is picked up.
 
-The triggering happens by patching a pod annotation (`kubectl rollout restart deployment/billing`) or by relying on a `Reloader`-style controller that watches the ConfigMap.
+The triggering is done by the rotator itself via `rollout restart` (no `Reloader`-style controller is involved in this deployment).
 
 ## Config
 
-| Variable | Purpose |
-|----------|---------|
-| `KEYCLOAK_URL` | base URL of Keycloak |
-| `KEYCLOAK_REALM` | realm name (`EEGFaktura`) |
-| `BILLING_NAMESPACE` | namespace where to apply the ConfigMap |
-| `BILLING_DEPLOY` | deployment name to roll out (or rely on Reloader) |
-| `CERT_CONFIGMAP_NAME` | target ConfigMap name |
+The env vars the script reads (with the values set in the manifest):
+
+| Variable | Purpose | Default in manifest |
+|----------|---------|---------------------|
+| `KC_URL` | base URL of Keycloak | `http://eegfaktura-keycloak:8080` |
+| `REALM` | realm name | `EEGFaktura` |
+| `NS` | namespace where the ConfigMap / deployment live | `eegfaktura` |
+| `DEPLOY_NAME` | billing deployment to roll out | `eegfaktura-billing` |
+| `CM_NAME` | target ConfigMap name | `eegfaktura-jwt-cert` |
 
 ## RBAC
 
-The rotator needs:
+The manifest ships a dedicated `ServiceAccount` (`billing-cert-rotator`) and a namespace-scoped `Role`:
 
-- `get`, `create`, `update` on `ConfigMaps` in the target namespace
-- `patch` on `Deployments` (if it triggers the rollout itself)
+- `get`, `update`, `patch` on the `eegfaktura-jwt-cert` ConfigMap (restricted via `resourceNames`)
+- `create` on `configmaps` (for the first-boot bootstrap, before the ConfigMap exists)
+- `get`, `patch` on the `eegfaktura-billing` Deployment (restricted via `resourceNames`) to trigger the rollout
 
-Use a dedicated `ServiceAccount` with the narrowest possible Role.
+This is already the narrowest practical Role; the verbs are scoped to named resources where possible.
 
 ## Scheduling
 
@@ -62,7 +75,7 @@ Keycloak's default key rotation interval is typically long (months / disabled). 
 - realm re-imports during provisioning
 - key changes after upgrades
 
-A weekly cadence is a reasonable default. If the key has not changed, the Job is a no-op.
+The manifest runs it **daily** at `03:30 Europe/Vienna` (`schedule: "30 3 * * *"`, `timeZone: Europe/Vienna`). If the key has not changed, the run is a no-op. A separate one-shot bootstrap `Job` (with a `wait-for-keycloak` init container and `ttlSecondsAfterFinished: 120`) populates the ConfigMap on first deploy, so the billing pod does not get stuck in `FailedMount`.
 
 ## Failure modes
 

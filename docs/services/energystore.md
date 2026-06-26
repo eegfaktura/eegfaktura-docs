@@ -11,8 +11,8 @@ Go service that stores per-period energy time-series and answers report queries.
 
 | | |
 |---|---|
-| Language | Go |
-| Storage | Badger (embedded KV) on PVC |
+| Language | Go 1.24 (module `at.ourproject/energystore`) |
+| Storage | BadgerDB v4 (embedded KV) on PVC, values MessagePack-encoded |
 | Bus | MQTT subscriber |
 | Auth | JWT verify, `X-Tenant` header check |
 | Per-EEG bucket | one logical bucket per EEG `tenant` |
@@ -28,7 +28,7 @@ Go service that stores per-period energy time-series and answers report queries.
 
 ## Storage shape
 
-energystore writes to a Badger KV store at `/data`. Logical structure:
+energystore writes to an embedded BadgerDB v4 KV store with per-tenant / per-EC isolated instances; values are encoded with MessagePack (`tinylib/msgp`). The storage root is the container `VOLUME /opt/rawdata` (production `config-prod.yaml` sets `persistence.path: /opt/energy/rawdata`). Logical structure:
 
 ```
 <tenant>/
@@ -44,15 +44,18 @@ Each slot stores values per quarter-hour for the configured time range. There is
 
 ## MQTT input
 
+energystore uses `eclipse/paho.mqtt.golang` v1.5.1 (MQTT 3.1.1), with QoS 1 by default. The broker connection, client id, QoS and topics are read from config (`mqtt.*`).
+
 !!! note "Production topic and payload differ from the README"
-    The legacy README documented `eegfaktura/<tenant>/energy/<meterId>` with a plain-JSON payload. The actual production subscription pattern, as configured in the `eegfaktura-energystore-config` ConfigMap, is:
+    The legacy README documented `eegfaktura/<tenant>/energy/<meterId>` with a plain-JSON payload. The actual energy subscription pattern (config `mqtt.energySubscriptionTopic`) is:
 
-    - **Topic**: `eda/response/+/protocol/cr_msg` (energy data) and `eda/response/+/protocol/inverter_msg` (PV inverter)
-    - **Payload**: an encrypted envelope, *not* plain JSON. The producer ([eda-xp](eda-xp.md)) wraps the per-message JSON; energystore unwraps it before the JSON parse — see [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format.
+    - **Topic**: `eda/response/+/protocol/cr_msg`. Note a config/doc inconsistency: `config-prod.yaml` may still carry the older `eda/response/energy/+` pattern, so confirm the deployed ConfigMap value rather than assuming one.
+    - **Inverter topic**: `mqtt.inverterSubscriptionTopic` (e.g. `eda/response/+/protocol/inverter_msg`) is present in config but the server code only subscribes to the energy topic — the inverter topic is **configured but not actually subscribed** in v1.
+    - **Payload**: `base64(gzip(json))`. The producer ([eda-xp](eda-xp.md)) gzip-compresses the per-message JSON and base64-encodes it; energystore base64-decodes, gunzips, then parses JSON. There is **no encryption** in the v1 code path despite the misleadingly named `decryptMessage` helper.
 
-    The plain-JSON pattern below describes the **logical** payload after decryption.
+    The plain-JSON pattern below describes the **logical** payload after base64-decode + decompression.
 
-After decryption + decompression the payload is JSON:
+After base64-decode + decompression the payload is JSON:
 
 ```json
 {
@@ -109,36 +112,50 @@ There is no role check beyond authenticated-and-tenant-matches — `EEG_USER` an
 
 ## Persistence
 
-Badger persists to `/data`, mounted from a PVC. The PVC is the single source of truth for energy data. Two operational consequences:
+Badger persists to the configured `persistence.path` (container `VOLUME /opt/rawdata`; production `config-prod.yaml` uses `/opt/energy/rawdata`), mounted from a PVC. The PVC is the single source of truth for energy data. energystore does **not** own a PostgreSQL schema. Two operational consequences:
 
-- Wipe-replay of the namespace destroys this data; restore requires a PVC snapshot or re-import via EDA.
+- Deleting the namespace or PVC destroys this data; restore requires a PVC snapshot or re-import via EDA.
 - The PVC is RWO (single-writer). energystore is a single-replica deployment.
 
 The PVC dominates the storage footprint for the namespace.
 
 ## Config
 
+Config is loaded via viper from `config.yaml` (under `-configPath`) and overridden by environment variables. Viper uses the prefix `ENERGYSTORE_` with `.` → `_`, so `mqtt.host` maps to `ENERGYSTORE_MQTT_HOST`, etc. A few variables (`PORT`, `KEYCLOAK_CONFIG`) are read directly and are **not** prefixed.
+
 | Variable | Purpose |
 |----------|---------|
-| `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASS` | broker connection |
-| `KEYCLOAK_URL`, `KEYCLOAK_REALM` | JWKS source |
-| `BADGER_DIR` | typically `/data` |
-| `LOG_LEVEL` | log verbosity |
+| `ENERGYSTORE_MQTT_HOST` | broker connection (`host:port`) |
+| `ENERGYSTORE_MQTT_ID` | MQTT client id |
+| `ENERGYSTORE_MQTT_QOS` | subscription QoS (default 1) |
+| `ENERGYSTORE_MQTT_ENERGYSUBSCRIPTIONTOPIC` | energy-data topic |
+| `ENERGYSTORE_MQTT_INVERTERSUBSCRIPTIONTOPIC` | inverter topic (configured, not subscribed) |
+| `ENERGYSTORE_PERSISTENCE_PATH` | Badger storage path |
+| `ENERGYSTORE_JWT_PUBKEYFILE` | JWT public key file |
+| `ENERGYSTORE_SERVICES_MAIL_SERVER` | mail service address |
+| `ENERGYSTORE_SERVICES_MASTER_SERVER` | masterdata service address |
+| `PORT` | HTTP listen port (default 8080, read directly) |
+| `KEYCLOAK_CONFIG` | path to `keycloak.json` (default `./keycloak.json`, read directly) |
 
 ## Build and image
 
 - Source: `eegfaktura-energystore`
-- Build: multi-stage Docker, distroless final
+- Build: **single-stage** `Dockerfile` on `golang:1.24` (not multi-stage, not distroless). The Go builder image is also the runtime image; `go build` produces the `energystore` binary at `/usr/local/bin/energystore`.
+- gRPC/protobuf code is generated at build time via `protoc` (`make protoc`).
+- Entrypoint: `CMD ["energystore", "-configPath", "/etc/energystore/", "-logtostderr=true", "-stderrthreshold=INFO"]` — the `-logtostderr` / `-stderrthreshold` flags come from `glog`.
 - Tag: commit SHA
 
-The build image should not be shipped as the runtime image. The image-size and CVE-surface impact of using the Go builder image directly is significant. Multi-stage distroless is the convention.
+!!! note "Binary name discrepancy"
+    The Docker build produces a binary named `energystore` (no hyphen), but the `Makefile` `make build` target produces `energy-store` (with hyphen, `BINARY_NAME=energy-store`). The image and `CMD` use the un-hyphenated `energystore`.
+
+Because the build uses a single-stage `golang` image as the runtime, the image is larger and carries a wider CVE surface than a multi-stage / distroless build would. Migrating to multi-stage is a potential future improvement.
 
 ## Known limitations (drove the v2 design)
 
 - **No multi-replica scaling**: BadgerDB embedded + ReadWriteOnce-PVC technically prevent running more than one replica.
 - **Full-range read-modify-write per EDA-message**: an incoming CR_MSG triggers reading the entire time range from disk, merging, and writing back — produces large RAM and CPU spikes under load.
 - **In-process tenant lock**: a `Turns.lock(tenant)` mutex serialises all EDA processing per tenant, capping throughput.
-- **Topic-scoped payload encryption**: the encryption envelope applies to the `cr_msg` topic only. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption).
+- **base64+gzip payload envelope (no encryption)**: incoming `cr_msg` payloads are `base64(gzip(json))` — the v1 code path base64-decodes and gunzips, then parses JSON. The `decryptMessage` helper performs no cryptography despite its name.
 
 These points are the explicit motivation for [energystore-v2](energystore-v2.md). See ADR-0010 in `eegfaktura-platform` for the architecture justification.
 
