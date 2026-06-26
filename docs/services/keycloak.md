@@ -1,6 +1,6 @@
 # keycloak
 
-OIDC identity provider for the entire platform. One realm, four clients, four groups. Bootstrapped by the provisioning pipeline via realm-export import + per-user Job.
+OIDC identity provider for the entire platform. One realm, four clients, four groups.
 
 ## At a glance
 
@@ -10,19 +10,10 @@ OIDC identity provider for the entire platform. One realm, four clients, four gr
 | Realm | `EEGFaktura` |
 | Token signing | RS256 |
 | State | PostgreSQL database `keycloak` |
-| Bootstrap | Jobs in `eegfaktura-bootstrap` chart |
 
 In the local docker-compose stack Keycloak runs the custom `ghcr.io/eegfaktura/eegfaktura-keycloak:latest` image, started with `start --optimized --import-realm`. The realm (`EEGFaktura`) is imported from `./keycloak/import`. It publishes the main port `8080` and the management port `9181` (`KC_HTTP_MANAGEMENT_PORT`), and runs with `KC_PROXY=edge` and `KC_HOSTNAME_STRICT=false` for local use.
 
-For the auth contract (clients, mappers, JWT claims, role behavior), see [Architecture / Authentication](../architecture/auth.md). This page covers the **deployment and operational** side.
-
-## Bootstrap procedure
-
-The provisioning pipeline runs three Jobs in order:
-
-1. **`kc-realm-config`** (Helm hook weight `-5`) — `initContainer` waits for `/realms/master` to respond. Then imports the realm: clients, default scopes, mappers, groups.
-2. **`kc-users`** (Helm hook weight `0`) — creates users from the instance file's `bootstrapUsers` list. For each user: create, set credentials (one-time-use or persistent), set group memberships, set tenant attribute(s).
-3. (subsequent jobs depend on Keycloak being responsive — covered by their own initContainers)
+For the auth contract (clients, mappers, JWT claims, role behavior), see [Architecture / Authentication](../architecture/auth.md). This page covers the Keycloak realm content.
 
 ## Realm content
 
@@ -87,5 +78,4 @@ The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktu
 ## Related
 
 - [Architecture / Authentication](../architecture/auth.md) — the full auth contract
-- [Operations / Pipeline](../operations/pipeline.md) — bootstrap flow
 - [services/billing-cert-rotator](billing-cert-rotator.md) — JWT cert refresh

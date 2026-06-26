@@ -134,7 +134,7 @@ Consult the deployed `ConfigMap` for the authoritative list.
 
 ## Local development
 
-The service expects PostgreSQL, Mosquitto, and Keycloak to be reachable. The provisioning pipeline's bootstrap chart provides all three in a working configuration.
+The service expects PostgreSQL, Mosquitto, and Keycloak to be reachable. The local docker-compose stack provides all three in a working configuration.
 
 For pure code work, the test suite uses `sqlmock`. Note: handlers that open + defer-close the DB twice in one call break sqlmock (the second call sees "database is closed"). The fix-pattern is to keep `OpenDbXConnection` for public API and add a `*DB`-variant for handler batching.
 

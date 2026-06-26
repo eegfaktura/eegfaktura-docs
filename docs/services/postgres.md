@@ -42,7 +42,7 @@ A `pg_dump --schema-only` restore conflicts with billing's Flyway. See the "sche
 
 ## Extensions
 
-The bootstrap chart enables what each service needs. The most common extension required is `uuid-ossp` (for UUID generation in `base` schema defaults). A missing `uuid-ossp` causes `gen_random_uuid()` or `uuid_generate_v4()` calls in INSERTs to fail at runtime.
+Each service's required PostgreSQL extensions must be enabled. The most common one is `uuid-ossp` (for UUID generation in `base` schema defaults). A missing `uuid-ossp` causes `gen_random_uuid()` or `uuid_generate_v4()` calls in INSERTs to fail at runtime.
 
 The bootstrap Job creates the extension if it does not exist; ensure the bootstrap user has the right privilege.
 
@@ -57,22 +57,11 @@ Each application service has its own database user, scoped to its schemas. Conne
 | `filestore-db-secret` | filestore |
 | `keycloak-db-secret` | keycloak (own database) |
 
-A separate **bootstrap user** with broader privileges runs the schema-creation Job. It is granted `CREATE` on the database and ownership of the per-service schemas after creation, then handed off to the per-service user.
-
-## Bootstrap
-
-The `db-schema` Job in `eegfaktura-bootstrap`:
-
-1. `initContainer` `pg_isready` + `psql -tAc 'SELECT 1'` against the application database.
-2. `DROP SCHEMA IF EXISTS base CASCADE` (idempotent against partial state).
-3. Apply the schema dump or migration set.
-4. Grant per-schema privileges to the per-service users.
-
-This Job is intentionally idempotent — a failed attempt that left a partially-created schema can be re-run. The `DROP SCHEMA IF EXISTS` step was added explicitly because earlier Job attempts could leave the schema half-created on the first failure, causing all subsequent retries to fail with `relation already exists`.
+Schema creation requires a higher-privilege user (granted `CREATE` on the database and ownership of the per-service schemas); the per-service users are then used for normal operation.
 
 ## Persistence
 
-PostgreSQL uses a RWO PVC. `base.processhistory` and the `eda.*` workflow tables grow with EDA traffic; `base.processhistory` has no retention policy yet — see [eegfaktura-backend issue #105](https://github.com/gemeinstrom/eegfaktura-backend/issues/105) for the partitioning + retention plan. Wipe-replay destroys the PVC along with the namespace.
+PostgreSQL uses a RWO PVC. `base.processhistory` and the `eda.*` workflow tables grow with EDA traffic; `base.processhistory` has no retention policy yet (partitioning + retention are planned). Deleting the PVC destroys the database.
 
 ## postgres-energy (TimescaleDB, energystore-v2 only)
 
@@ -89,8 +78,6 @@ The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG 
 
 Backup strategy is deployment-specific. The supported pattern is CloudNativePG with WAL streaming to S3-compatible object storage. Manual `pg_dump` is fine for dev / small instances.
 
-A wipe-replay does not restore from backup — it re-applies the schema dump and the sample-data Job. To recover from a backup after a wipe, restore the PVC (or restore from CNPG WAL) before running `bootstrap`.
-
 ## Operational notes
 
 - The `eda` schema is the second-largest after `base` in production instances. `eda.message` (or similar) grows linearly with EDA traffic.
@@ -99,10 +86,9 @@ A wipe-replay does not restore from backup — it re-applies the schema dump and
 
 ## fsGroup caveat
 
-On some clusters / storage classes, the PostgreSQL container's `fsGroup` setting must match the PVC's mount group, otherwise the PG data directory is not writable. Misconfigured fsGroup is a frequent first-boot failure. The `pre-wipe-check.sh` script in the provisioning pipeline includes an fsGroup audit.
+On some clusters / storage classes, the PostgreSQL container's `fsGroup` setting must match the PVC's mount group, otherwise the PG data directory is not writable. Misconfigured fsGroup is a frequent first-boot failure.
 
 ## Related
 
 - [Architecture / Databases](../architecture/databases.md) — schema layout, dump-vs-Flyway, notable tables
-- [Operations / Pipeline](../operations/pipeline.md) — bootstrap order
 - [services/keycloak](keycloak.md) — uses its own DB

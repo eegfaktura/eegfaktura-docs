@@ -147,10 +147,9 @@ See [services/backend](../services/backend.md#eda-subscriptions) for the subscri
 | Authentication | Keycloak realm + per-service JWT verification | [Authentication](auth.md) |
 | Database access | One PostgreSQL cluster, schema per service | [Databases](databases.md) |
 | Messaging | Mosquitto MQTT, EDA-inbound pipeline | [Messaging](messaging.md) |
-| Deployment | Helm charts + Argo CD (services) + Helm-managed bootstrap chart (data) | [Deployment](deployment.md) |
 
 ## Source repositories
 
-Each service is its own repository. The platform repository (Helm charts, Argo manifests, provisioning pipeline) is a separate repository and orchestrates the deployment of all of them.
+Each service is its own repository. The platform repository (`eegfaktura-platform`) is a separate repository that holds the deployment manifests and tooling for all of them.
 
 Service-to-repository mapping is documented per service page under [Services](../services/index.md).

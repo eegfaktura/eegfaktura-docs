@@ -53,7 +53,7 @@ admin-backend uses Slick and ships **no** Flyway/migrations in-repo.
 
 ## Connection model
 
-Each service has its own database user with privileges scoped to its schema. Connection details come from `secrets/<service>-db-secret` (or equivalent), populated by the provisioning pipeline.
+Each service has its own database user with privileges scoped to its schema. Connection details are provided as Kubernetes Secrets (or, in the local stack, as docker-compose environment variables).
 
 | Service | Schema scope | Migration tool |
 |---------|--------------|----------------|
@@ -67,7 +67,7 @@ Each service has its own database user with privileges scoped to its schema. Con
 
 Some deployments initialize the schema from a `pg_dump --schema-only` snapshot taken from a reference instance. This works for `base`, `eda`, and `filestore`, but conflicts with billing's Flyway. When billing starts against a database that already contains `billingj.*` tables (because they were in the dump), Flyway tries to re-create them and fails.
 
-Workaround: `DROP SCHEMA billingj CASCADE` before the billing pod starts the first time, then let Flyway create the schema fresh. The provisioning pipeline's bootstrap chart handles this for instances that use the dump-restore pattern.
+Workaround: `DROP SCHEMA billingj CASCADE` before the billing pod starts the first time, then let Flyway create the schema fresh.
 
 ## Notable tables
 
@@ -138,9 +138,7 @@ The energy data shape is documented in detail in [reference/obis-codes](../refer
 
 ## Backups
 
-PostgreSQL backups are deployment-specific (typically CloudNativePG with WAL streaming to object storage). energystore PVCs need separate snapshotting because the KV store is not part of the PostgreSQL backup chain.
-
-A wipe-replay (full namespace teardown + reprovision) re-imports schema and sample data from the bootstrap chart but does **not** restore energy time-series. In a real disaster scenario, energystore data must be restored from a PVC snapshot or re-imported via EDA.
+PostgreSQL backups are deployment-specific (typically CloudNativePG with WAL streaming to object storage). energystore PVCs need separate snapshotting because the KV store is not part of the PostgreSQL backup chain — energy time-series must be restored from a PVC snapshot or re-imported via EDA.
 
 ## Related
 

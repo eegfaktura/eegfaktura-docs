@@ -14,9 +14,8 @@ A microservice-based platform that:
 
 ## Documentation map
 
-- **[Architecture](architecture/index.md)** — How services fit together. Service topology, authentication flow, databases, messaging, deployment patterns.
+- **[Architecture](architecture/index.md)** — How services fit together. Service topology, authentication flow, databases, messaging.
 - **[Services](services/index.md)** — One page per deployed service. Responsibilities, APIs, configuration, secrets, image provenance.
-- **[Operations](operations/index.md)** — Provisioning, wipe-replay, observability.
 - **[Reference](reference/index.md)** — Glossary (OBIS, EDA, EEG terminology), reference tables.
 
 ## Quick orientation
@@ -24,7 +23,6 @@ A microservice-based platform that:
 If you are…
 
 - **New to the codebase** — start with [Architecture / Service Overview](architecture/overview.md), then drill down to a specific service page.
-- **Operating a deployment** — see [Operations / Provisioning Pipeline](operations/pipeline.md).
 - **Adding a feature to a single service** — go directly to the service page (`services/<name>.md`).
 - **Investigating auth issues** — see [Architecture / Authentication](architecture/auth.md).
 
@@ -33,4 +31,4 @@ If you are…
 - Examples use generic placeholders: `<eeg-domain>` for the public domain, `<tenant-id>` for the EEG community ID, `<namespace>` for the Kubernetes namespace.
 - Service-internal DNS uses Kubernetes service-name patterns: `<service>.<namespace>.svc.cluster.local`.
 - JWT claims are documented with the exact claim name as emitted by Keycloak.
-- These docs focus on **how things connect** — architecture, schemas, protocols, code-level gotchas. Production sizing, resource consumption, and operational tuning live in ADRs (`eegfaktura-platform/docs/adr/`) and per-cluster Helm values, not here.
+- These docs focus on **how things connect** — architecture, schemas, protocols, code-level gotchas. Deployment, provisioning, production sizing, and operational tuning live in the platform repo (`eegfaktura-platform`), not here.

@@ -102,7 +102,7 @@ Migrations are run by Alembic (`alembic upgrade head`) on startup, before `pytho
 ## Operational notes
 
 - The PVC is RWO; filestore is a single-replica deployment.
-- Wipe-replay destroys uploaded blobs along with the PVC. Long-lived deployments should snapshot the PVC, not rely on the bootstrap to re-create files.
+- Deleting the PVC destroys uploaded blobs. Long-lived deployments should snapshot the PVC.
 - Source lineage drift: the production-deployed filestore historically lagged the public-clone source by years. When recovering or upgrading, verify the running image's `.git` config to see which upstream produced it, rather than assuming the public mirror.
 
 ## Related
