@@ -5,7 +5,7 @@ Thanks for your interest in improving the eegfaktura documentation.
 ## Reporting issues
 
 Found a factual error, broken link, or outdated section? Please open an issue:
-https://github.com/gemeinstrom/eegfaktura-docs/issues
+https://github.com/eegfaktura/eegfaktura-docs/issues
 
 Include the affected page (path under `docs/`) and, if possible, what the correct content should be.
 

@@ -6,12 +6,11 @@ This documentation covers:
 
 - **Architecture** — service topology, authentication, data flows
 - **Services** — per-service responsibilities, APIs, configuration, image provenance
-- **Operations** — deployment pipeline, wipe-replay procedure
 - **Reference** — glossary, OBIS codes, EDA terminology
 
 ## Reading the docs
 
-- **Browsable site:** https://gemeinstrom.github.io/eegfaktura-docs/ (GitHub Pages)
+- **Browsable site:** https://eegfaktura.github.io/eegfaktura-docs/ (GitHub Pages)
 - **Markdown source:** [`docs/`](docs/) in this repository
 
 ## Audience
@@ -22,19 +21,22 @@ Not a user manual for end users (members of an energy community) — see the off
 
 ## Source code
 
-The eegfaktura suite is composed of multiple services. This documentation describes the deployments built from the `gemeinstrom` forks of the upstream repositories:
+The eegfaktura suite is composed of multiple services, each in its own repository in the [`eegfaktura`](https://github.com/eegfaktura) organisation (energystore-v2 currently lives in the `vfeeg-development` organisation):
 
-| Service | Upstream | Fork (this org) |
-|---------|----------|-----------------|
-| `eegfaktura-backend` | https://github.com/eegfaktura/eegfaktura-backend (Go) | `gemeinstrom/eegfaktura-backend` |
-| `eegfaktura-billing` | https://github.com/eegfaktura/eegfaktura-billing (Java/Spring) | `gemeinstrom/eegfaktura-billing` |
-| `eegfaktura-energystore` | https://github.com/eegfaktura/eegfaktura-energystore (Go) | `gemeinstrom/eegfaktura-energystore` |
-| `eegfaktura-energystore-v2` | — (new development, no upstream) | [gemeinstrom/eegfaktura-energystore-v2](https://github.com/gemeinstrom/eegfaktura-energystore-v2) (Go) |
-| `eegfaktura-filestore` | https://github.com/eegfaktura/eegfaktura-filestore (Python) | `gemeinstrom/eegfaktura-filestore` |
-| `eegfaktura-eda-xp` | https://github.com/eegfaktura/eegfaktura-eda-xp (Scala) | `gemeinstrom/eegfaktura-eda-comm` |
-| `eegfaktura-web` | https://github.com/eegfaktura/eegfaktura-web (React) | `gemeinstrom/eegfaktura-web` |
+| Service | Repository | Language |
+|---------|------------|----------|
+| `eegfaktura-backend` | https://github.com/eegfaktura/eegfaktura-backend | Go |
+| `eegfaktura-billing` | https://github.com/eegfaktura/eegfaktura-billing | Java / Spring Boot |
+| `eegfaktura-energystore` | https://github.com/eegfaktura/eegfaktura-energystore | Go |
+| `eegfaktura-energystore-v2` | https://github.com/vfeeg-development/eegfaktura-energystore-v2 | Go (next-gen store) |
+| `eegfaktura-filestore` | https://github.com/eegfaktura/eegfaktura-filestore | Python / FastAPI |
+| `eegfaktura-eda-xp` | https://github.com/eegfaktura/eegfaktura-eda-xp | Scala / Pekko |
+| `eegfaktura-admin-backend` | https://github.com/eegfaktura/eegfaktura-admin-backend | Scala / Pekko |
+| `eegfaktura-web` | https://github.com/eegfaktura/eegfaktura-web | React / Ionic |
+| `eegfaktura-admin` | https://github.com/eegfaktura/eegfaktura-admin | React |
+| `eegfaktura-docker-compose` | https://github.com/eegfaktura/eegfaktura-docker-compose | local dev stack |
 
-Fork repositories are being published incrementally as part of the AGPL-§13 source-publication process; forks that are not public yet are listed by name without a link.
+All service repositories are public and licensed under AGPL-3.0.
 
 ## Contributing
 
