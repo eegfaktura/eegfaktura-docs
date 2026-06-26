@@ -18,7 +18,7 @@ See [services/mosquitto](../services/mosquitto.md) for sizing and operational no
 | Topic pattern | Publisher | Subscriber | Payload |
 |---|---|---|---|
 | `eda/<tenant>/protocol/<process_lower>` | eda-xp | backend | EbMsMessage (cleartext JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around `MqttEnergyMessage` JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encryption)) |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around `MqttEnergyMessage` JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encoding)) |
 | `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore / energystore-v2 | cleartext `MqttEnergyMessage` (PV inverter telemetry) |
 | `eda/response/<tenant>/protocol/cr_req_pt` | eda-xp | backend | cleartext EbMsMessage (period-request workflow event) |
 | `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | energystore-v2 in pilot | cleartext `MqttEnergyMessage` (pilot convention) |
@@ -29,7 +29,7 @@ The tenant slot is the EEG's `community_id` / `ecId`. `<process_lower>` is the E
     The energy topic pattern is `eda/response/+/protocol/cr_msg`. Some production configs may still reference the legacy form `eda/response/energy/+` — check the deployed config when reconciling subscriptions.
 
 !!! warning "CR_MSG is the only compressed topic"
-    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (the eda-xp source carries a `// Todo: Encrypt` comment — encryption is a documented TODO, not implemented). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encryption](../services/eda-xp.md#cr_msg-payload-encryption) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
+    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (the eda-xp source carries a `// Todo: Encrypt` comment — encryption is a documented TODO, not implemented). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encoding](../services/eda-xp.md#cr_msg-payload-encoding) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
 
 ## EDA inbound pipeline
 

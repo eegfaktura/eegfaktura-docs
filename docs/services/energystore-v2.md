@@ -103,7 +103,7 @@ Subscribes (multi-replica capable) to:
 
 ### Optional payload decrypt
 
-The production v1 stack wraps `cr_msg` payloads in an encrypted envelope — see [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format. For drop-in compatibility v2 ships an optional pre-decode step, env-configurable:
+The v1 `cr_msg` wire format is gzip + Base64 and is **not** encrypted — see [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format. v2 ships an optional, disabled-by-default pre-decode step for forward-compatibility, should an encrypted envelope ever be introduced upstream:
 
 | Env | Default | Effect |
 |---|---|---|
