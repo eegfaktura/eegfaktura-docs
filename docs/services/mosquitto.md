@@ -22,13 +22,13 @@ The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktu
 | Topic (prod) | Publisher | Subscriber | Payload |
 |---|---|---|---|
 | `eda/<tenant>/protocol/<process_lower>` | eda-xp / eda-mock | backend | `EbMsMessage` (JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore | encrypted envelope around `MqttEnergyMessage` JSON ([wire format](eda-xp.md#cr_msg-payload-encryption)) |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore | gzip + Base64 around `MqttEnergyMessage` JSON, not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
 | `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore | plain JSON `MqttEnergyMessage` (PV inverter; not encrypted) |
 | `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | [energystore-v2](energystore-v2.md) | plain `MqttEnergyMessage` JSON (pilot convention) |
 
 `<tenant>` is the EEG's `community_id`. `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …).
 
-The `cr_msg` topic is the one carrying actual energy values per metering point, hence the encryption. The `cr_req_pt` topic (outbound period requests) is cleartext — request metadata only. See [eda-xp.md#cr_msg-payload-encryption](eda-xp.md#cr_msg-payload-encryption) for the wire format.
+The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). The `cr_req_pt` topic (outbound period requests) is cleartext — request metadata only. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
 
 Subscriber-side details are documented per service: see [backend](backend.md) and [energystore](energystore.md).
 

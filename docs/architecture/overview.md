@@ -83,8 +83,8 @@ Stateful dependencies, deployed alongside the application services.
 | **keycloak** | OIDC identity provider, single realm `EEGFaktura` | [services/keycloak.md](../services/keycloak.md) |
 | **postgres** | Relational database (custom image); one `eegfaktura` DB with multiple schemas plus a separate `keycloak` DB | [services/postgres.md](../services/postgres.md) |
 | **mosquitto** | MQTT broker for EDA inbound messages and energy data | [services/mosquitto.md](../services/mosquitto.md) |
-| **postfix** | Mail relay (forwards to an external SMTP relay host) | [services/postfix.md](../services/postfix.md) |
-| **proxy** | Caddy reverse proxy (host ports 8001 customer SPA / 8002 admin SPA) | [services/proxy.md](../services/proxy.md) |
+| **postfix** | Mail relay (forwards to an external SMTP relay host) | [services/mailpit.md](../services/mailpit.md) |
+| **proxy** | Caddy reverse proxy (host ports 8001 customer SPA / 8002 admin SPA) | — |
 
 !!! note "billing-cert-rotator is platform-only"
     The **billing-cert-rotator** (refetches Keycloak's JWT signing cert for billing) is a platform/Kubernetes-only component. It is **not** part of the local docker-compose stack and is not in the billing repo.
