@@ -11,10 +11,13 @@ PostgreSQL cluster. Hosts the main application database (multiple schemas), the 
 
 | | |
 |---|---|
-| Image | PostgreSQL (e.g. `postgres:18-alpine` in current deployments) |
+| Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0` |
 | Topology | typically single instance for dev; managed cluster (CloudNativePG) for production |
 | Storage | PVC (RWO) |
 | Schemas | `base`, `eda`, `billingj`, `filestore` (in the main DB) |
+
+!!! note "The local stack uses a custom Postgres image"
+    The local docker-compose stack runs `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0`, **not** an upstream `postgres:*` image. This custom image performs its own initialization internally: on first start it creates the `eegfaktura` application database and the `keycloak` database (via `DB_*` / `KEYCLOAK_DB_*` env vars) and initializes the data directory with locale `de_DE:UTF8` (`POSTGRES_INITDB_ARGS`). Locally it is published on host port `26432` (→ container `5432`). Production may use a different image and topology (see CloudNativePG below).
 
 For the per-service schema layout, see [Architecture / Databases](../architecture/databases.md).
 

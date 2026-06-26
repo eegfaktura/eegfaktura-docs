@@ -16,7 +16,7 @@ eegfaktura is deployed on Kubernetes. The pattern combines **Argo CD** (for appl
 │  │   ├── backend  billing  energystore  filestore │  │
 │  │   ├── eda-xp  eda-mock  admin-backend          │  │
 │  │   ├── web  admin-web                           │  │
-│  │   └── billing-cert-rotator                     │  │
+│  │   └── billing-cert-rotator (CronJob)           │  │
 │  │                                                │  │
 │  │   Bootstrap Jobs (Helm-managed)                │  │
 │  │   ├── db-schema                                │  │
@@ -32,6 +32,12 @@ eegfaktura is deployed on Kubernetes. The pattern combines **Argo CD** (for appl
 │  ApplicationSet → Apps → service charts              │
 └──────────────────────────────────────────────────────┘
 ```
+
+!!! note "Mail component"
+    In the Kubernetes manifests the `mailpit` workload is an **in-cluster SMTP mock** (image `axllent/mailpit`) used for billing-mail testing; its Service is named `eegfaktura-postfix` so the billing image finds its mail target without changes. The **local docker-compose** stack instead runs a real **Postfix relay** (`eegfaktura-postfix`, forwarding to an external SMTP relay via `POSTFIX_RELAY_*`). Production is expected to use an external transactional-mail provider rather than mailpit.
+
+!!! note "`billing-cert-rotator`"
+    `billing-cert-rotator` is a Kubernetes **CronJob** (plus a one-shot bootstrap Job) defined in the platform repo, not part of the billing service source. It periodically refreshes Keycloak's RS256 signing certificate into the `eegfaktura-jwt-cert` ConfigMap and triggers a billing rollout, because the billing backend reads the cert from a file instead of OIDC discovery.
 
 ## Helm charts
 
@@ -131,9 +137,12 @@ The provisioning pipeline reads this file and feeds the relevant sections to the
 
 ## Image provenance
 
-Images are pulled from a container registry (typically GHCR or an org-internal registry). Each service repo has its own CI pipeline that publishes images on push to `master`, tagged with the commit SHA. Pinned image tags (not `:latest`) are mandatory in production.
+Images are pulled from a container registry (typically GHCR or an org-internal registry). Each service repo has its own CI pipeline that publishes images on push to `master`, tagged with the commit SHA. Pinned image tags (not `:latest`) are the intended production policy.
 
 The image tag of each service in an instance is set in the per-service Helm values, not in the chart itself. This decouples chart releases from image releases.
+
+!!! note "Local dev uses `:latest`"
+    The local **docker-compose** stack is development-only and pulls `:latest` tags for most services (a few are pinned, e.g. `eegfaktura-postgresql:0.2.0`). Do not treat the compose tags as the production pinning policy.
 
 ## Robustness layers
 

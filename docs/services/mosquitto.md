@@ -6,11 +6,13 @@ Eclipse Mosquitto MQTT broker. The platform's message bus, used for EDA inbound 
 
 | | |
 |---|---|
-| Image | `eclipse-mosquitto:2.0.x` |
+| Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` |
 | Topology | single-instance StatefulSet |
-| Port | 1883 (plain), no TLS by default |
+| Port | 1883 (plain), no TLS by default; internal only in the local stack (not published to the host) |
 | Persistence | PVC-backed |
 | Optional sidecar | `mosquitto-exporter` (Prometheus metrics) |
+
+The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` (with `mosquitto.conf` baked in), rather than an upstream `eclipse-mosquitto` image. Port `1883` is reachable only inside the compose network; it is not published to the host.
 
 ## Topic catalogue
 

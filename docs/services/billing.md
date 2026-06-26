@@ -6,10 +6,11 @@ Java / Spring service. Generates billing documents per EEG per billing period. O
 
 | | |
 |---|---|
-| Language | Java |
-| Framework | Spring Boot + Spring Security |
-| State | PostgreSQL schema `billingj` (Flyway-migrated) |
-| Auth | Spring Security JWT, `hasRole(EEG_ADMIN)` |
+| Language | Java 21 |
+| Framework | Spring Boot 3.5.3 + Spring Security (Maven build) |
+| Reporting | JasperReports 7.0.2 (PDF invoice / credit-note rendering) |
+| State | PostgreSQL schema `billingj` (Flyway-migrated, `ddl-auto=validate`) |
+| Auth | Spring Security JWT (RS256), `hasRole(EEG_ADMIN)` |
 | Inter-service | reads master data from backend, energy from energystore |
 
 ## Responsibilities
@@ -50,7 +51,9 @@ A follow-up in this service's source is to accept `vfeeg-superuser` as an alias 
 
 ## JWT cert mount
 
-billing verifies tokens by reading an RSA public-key PEM at `/billing/zertifikat-pub.pem`, **not** by fetching JWKS at runtime. The image does not bake a PEM.
+billing verifies tokens by reading an X.509 certificate / RSA public-key PEM, converting it to an `RSAPublicKey` and validating tokens with RS256. It reads the file from the path in `JWT_PUBLICKEYFILE` (default `/billing/zertifikat-pub.pem`), **not** by fetching JWKS at runtime. The image does not bake a PEM.
+
+The cert is read once and is **not** hot-reloaded; the billing pod must be restarted when the mounted ConfigMap changes.
 
 The PEM must be Keycloak's current RS256 signing cert. Fetch:
 
@@ -76,7 +79,7 @@ volumes:
       name: eegfaktura-jwt-cert
 ```
 
-On Keycloak re-import or key rotation, the ConfigMap must be regenerated and the billing pod restarted. The `billing-cert-rotator` service automates the fetch on a schedule — see [services/billing-cert-rotator](billing-cert-rotator.md).
+On Keycloak re-import or key rotation, the ConfigMap must be regenerated and the billing pod restarted. This loop is automated at the platform level (not in the billing source) by the `billing-cert-rotator` CronJob — see [services/billing-cert-rotator](billing-cert-rotator.md).
 
 ## Tenant header
 
@@ -124,18 +127,29 @@ In some deployments `base.eeg.tenant == base.eeg.rc_number`; in others they dive
 
 ## Config
 
+These are the variables the application actually reads (`application.properties`):
+
 | Variable | Purpose |
 |----------|---------|
-| `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` | PG connection |
-| `KEYCLOAK_URL`, `KEYCLOAK_REALM` | issuer for token validation |
+| `JDBC_DATABASE_URL`, `JDBC_DATABASE_USERNAME`, `JDBC_DATABASE_PASSWORD` | PostgreSQL connection (JDBC) |
+| `JWT_PUBLICKEYFILE` | path to the RS256 public-key / X.509 cert PEM (default `/billing/zertifikat-pub.pem`) |
+| `MAIL_HOST`, `MAIL_PORT` | SMTP server for sending billing mails |
+| `MAIL_USER`, `MAIL_PASSWORD` | SMTP credentials |
+| `MAIL_SMTP_AUTH`, `MAIL_SMTP_STARTTLS_ENABLE` | SMTP auth / STARTTLS toggles |
+| `MAIL_NO_REPLY_TO` | no-reply sender address |
+| `HOST_PORT` | HTTP listen port (default `8080`) |
 | JVM heap (`-Xmx`) | tune per environment; defaults are JVM-default which is large |
+
+There is **no** `SPRING_DATASOURCE_*` or `KEYCLOAK_*` configuration — the datasource is driven by the `JDBC_DATABASE_*` variables and token validation uses the local PEM file (`JWT_PUBLICKEYFILE`), not a Keycloak issuer URL.
 
 In smaller / dev deployments, set `-Xmx512m` or so to keep idle memory reasonable.
 
 ## Build and image
 
 - Source: `eegfaktura-billing`
-- Build: multi-stage Maven Docker; final image runs on a JRE
+- Build: multi-stage Docker — builder `maven:3-eclipse-temurin-21`, runtime `eclipse-temurin:21`
+- Artifact: `/opt/app/eegfaktura-billing.jar`; `ENTRYPOINT java -jar`
+- Listens on port `8080` (configurable via `HOST_PORT`)
 - Tag scheme: SemVer (Spring side stayed on tagged releases historically)
 
 ## Related

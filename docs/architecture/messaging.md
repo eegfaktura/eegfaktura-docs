@@ -18,22 +18,27 @@ See [services/mosquitto](../services/mosquitto.md) for sizing and operational no
 | Topic pattern | Publisher | Subscriber | Payload |
 |---|---|---|---|
 | `eda/<tenant>/protocol/<process_lower>` | eda-xp | backend | EbMsMessage (cleartext JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | encrypted envelope around `MqttEnergyMessage` ([wire format](../services/eda-xp.md#cr_msg-payload-encryption)) |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around `MqttEnergyMessage` JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encryption)) |
 | `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore / energystore-v2 | cleartext `MqttEnergyMessage` (PV inverter telemetry) |
 | `eda/response/<tenant>/protocol/cr_req_pt` | eda-xp | backend | cleartext EbMsMessage (period-request workflow event) |
 | `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | energystore-v2 in pilot | cleartext `MqttEnergyMessage` (pilot convention) |
 
 The tenant slot is the EEG's `community_id` / `ecId`. `<process_lower>` is the EDA process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
 
-!!! warning "CR_MSG is the only encrypted topic"
-    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic that the prod stack encrypts. Subscribers must unwrap the encrypted envelope before the JSON parse — see [services/eda-xp#cr_msg-payload-encryption](../services/eda-xp.md#cr_msg-payload-encryption) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
+!!! note "Legacy energy topic pattern in prod"
+    The energy topic pattern is `eda/response/+/protocol/cr_msg`. Some production configs may still reference the legacy form `eda/response/energy/+` — check the deployed config when reconciling subscriptions.
+
+!!! warning "CR_MSG is the only compressed topic"
+    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (the eda-xp source carries a `// Todo: Encrypt` comment — encryption is a documented TODO, not implemented). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encryption](../services/eda-xp.md#cr_msg-payload-encryption) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
 
 ## EDA inbound pipeline
 
-The end-to-end path of an inbound EDA message:
+eda-xp bridges EDA market communication to MQTT. It has **two inbound transports**: the Ponton X/P (KEP) adapter delivering AS4 over HTTP (port 6090), and email (IMAP/SMTP). Both feed the same handler chain below; responses are published to MQTT (`energy` / `cm` / `cp` / `error` topic prefixes), where the backend and energystore subscribe.
+
+The end-to-end path of an inbound EDA message (shown for the Ponton transport; email follows the same chain from the upload step onward):
 
 ```
-PONTON adapter (external)
+PONTON adapter (external, AS4 over HTTP on port 6090)
    │ HTTP POST multipart/form-data
    ▼
 eda-xp: FileService.handleUpload
@@ -90,6 +95,21 @@ EDA distinguishes two kinds of "version":
 
 A given process can have multiple supported versions in parallel. scalaxb-generated code is namespaced per (protocol, version) to keep them isolated.
 
+The ebUtilities schema versions currently dispatched in eda-xp are:
+
+| Schema | Versions |
+|--------|----------|
+| CMNotification | 01p11, 01p12, 01p20 |
+| CMRevoke | 01p00, 01p10 |
+| CMRequest | 01p10, 01p20, 01p21, 01p30 |
+| CPNotification | 01p13 |
+| ECMPList | 01p00, 01p10 |
+| ConsumptionRecord | 01p30, 01p40, 01p41 |
+| GCRequest | 01p00 |
+| Ponton KEP envelope | v320 |
+
+(There is no ConsumptionRecord 01p20 or 01p31 wired into the dispatcher, even where an XSD file happens to be present.)
+
 ## Gap points
 
 Six places where a new EDA version can silently drop:
@@ -118,7 +138,7 @@ Energy-data MQTT messages (`MqttEnergyMessage`) carry consumption / production v
 }
 ```
 
-v1 prod subscribes to `eda/response/<tenant>/protocol/cr_msg` (and `inverter_msg`), unwraps the encrypted envelope, decodes the `meterCode` into a storage slot, and writes the values to Badger. v2 follows the same wire-format (with the optional decrypt step env-configurable) but writes to TimescaleDB instead — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
+v1 prod subscribes to `eda/response/<tenant>/protocol/cr_msg` (and `inverter_msg`), Base64-decodes then gunzips the payload (`energyExecutor.go`), decodes the `meterCode` into a storage slot, and writes the values to Badger. v2 follows the same wire-format but writes to TimescaleDB instead — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
 
 Direction detection: a metering point is registered as a **producer** only if its payload contains a `P.01` or `P.01T` code. Receiving only `G.01` is ambiguous (consumers and producers both have a `G.01`) and the meter is then registered as a consumer.
 

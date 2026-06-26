@@ -2,22 +2,21 @@
 
 eegfaktura runs against **one or two PostgreSQL clusters**, depending on whether [energystore-v2](../services/energystore-v2.md) is deployed:
 
-- **`postgres`** — master data, Keycloak, optional Ponton adapter. Always present.
-- **`postgres-energy`** — TimescaleDB-backed time-series for energystore-v2. Present in pilot and planned for production cutover.
+- **`postgres`** — master data plus Keycloak's own logical database, optional Ponton adapter. Always present. In the local stack this is a single custom PostgreSQL image (`eegfaktura-postgresql`) that provisions both an `eegfaktura` application database and a separate `keycloak` database.
+- **`postgres-energy`** — a separate, optional second cluster (TimescaleDB) for energystore-v2. Pilot only — keep in mind it lives in a separate repo and is planned for a later production cutover.
 
-For the v1 stack only the first cluster exists; energystore v1 stores time-series in an **embedded Badger KV store on a persistent volume**, not in PostgreSQL.
+For the v1 stack only the first cluster exists; energystore v1 stores time-series in an **embedded BadgerDB KV store on a persistent volume**, not in PostgreSQL.
 
 ## Logical layout
 
 ```
-postgres cluster (master data)
-├── <main-database>
+postgres cluster (custom image)
+├── eegfaktura database
 │   ├── base       — backend (Go): participants, EEGs, metering points, contracts, tariffs
 │   ├── eda        — backend (Go) + eda-xp: EDA message storage, process history
 │   ├── billingj   — billing (Java): billing runs, line items, generated documents
-│   └── filestore  — filestore (Python): file metadata + blobs (or filesystem refs)
-├── keycloak       — Keycloak identity data
-└── pontonxp       — Ponton adapter state (if a real network-operator link is wired)
+│   └── filestore  — filestore (Python): file metadata (blobs on local filesystem)
+└── keycloak database — Keycloak identity data (separate logical DB)
 
 postgres-energy cluster (energystore-v2 only; TimescaleDB)
 └── energystore
@@ -42,14 +41,15 @@ Each schema is owned by exactly one service. Other services do not write to it.
 
 | Schema | Owner | Notes |
 |--------|-------|-------|
-| `base` | backend | Largest and most central schema. Master data. |
-| `eda` | backend + eda-xp | backend writes process history; eda-xp writes inbound message storage. |
-| `billingj` | billing | Spring/Flyway migrated. Conflict with full-DB dumps — see "schema dumps" below. |
-| `filestore` | filestore | File metadata, optional blob storage. |
-| `keycloak` | Keycloak | Managed entirely by Keycloak; no application access. |
-| `pontonxp` | Ponton adapter | Only present when a real Ponton link is deployed. |
+| `base` | backend | Largest and most central schema. Master data. Auto-migrated on startup (golang-migrate). |
+| `eda` | backend + eda-xp | backend writes process history; eda-xp writes inbound message storage. eda-xp manages its own tables with Slick + Flyway. |
+| `billingj` | billing | Flyway-migrated (`ddl-auto=validate`). Conflict with full-DB dumps — see "schema dumps" below. |
+| `filestore` | filestore | File metadata only (Alembic). Five tables: `file_categories`, `storages`, `file_containers`, `files`, `file_attributes`. Blobs live on the local filesystem, not in the database. |
+| `keycloak` (separate DB) | Keycloak | Keycloak's own logical database; managed entirely by Keycloak, no application access. |
 
-energystore does **not** own a PostgreSQL schema. It reads master data via the backend's REST API (or directly from `base` for some queries, depending on deployment) and stores energy time-series in its own Badger KV store on a PVC.
+energystore does **not** own a PostgreSQL schema. It reads master data via the backend's REST API (or directly from `base` for some queries, depending on deployment) and stores energy time-series in its own BadgerDB KV store on a PVC.
+
+admin-backend uses Slick and ships **no** Flyway/migrations in-repo.
 
 ## Connection model
 
@@ -57,10 +57,11 @@ Each service has its own database user with privileges scoped to its schema. Con
 
 | Service | Schema scope | Migration tool |
 |---------|--------------|----------------|
-| backend | `base` (write), `eda` (write) | Go-native migration runner (or none — schema applied via dump in some envs) |
-| billing | `billingj` | Flyway |
-| filestore | `filestore` | Python migration runner |
-| eda-xp | `eda` (write) | shared with backend |
+| backend | `base` (write), `eda` (write) | golang-migrate, auto-run on startup |
+| billing | `billingj` | Flyway (`ddl-auto=validate`) |
+| filestore | `filestore` | Alembic |
+| eda-xp | `eda` (write) + own tables | Slick + Flyway 10.20.0 |
+| admin-backend | `base` (read/write via Slick) | none (no in-repo migrations) |
 
 ## Schema dumps vs. Flyway
 
@@ -123,9 +124,9 @@ Holds raw and merged EDA message state, keyed by conversation ID. Used both for 
 
 `billing_run.mail_status` is a one-shot flag — once a billing run has been emailed, the UI hides the re-send button. To re-send, update the column to `NULL` directly; the next mail action then targets **all** recipients again.
 
-## Energy data — energystore + Badger
+## Energy data — energystore + BadgerDB
 
-Energy time-series are not in PostgreSQL. **energystore** uses an embedded Badger KV store on a PVC (`/data` inside the pod).
+Energy time-series are not in PostgreSQL. **energystore** uses an embedded BadgerDB KV store on a PVC (container path `/opt/rawdata`; production overlay `/opt/energy/rawdata`).
 
 Storage shape:
 
@@ -145,6 +146,6 @@ A wipe-replay (full namespace teardown + reprovision) re-imports schema and samp
 
 - [services/backend](../services/backend.md) — `base` and `eda` schema details
 - [services/billing](../services/billing.md) — Flyway migrations, billing-run state
-- [services/energystore](../services/energystore.md) — Badger storage format
+- [services/energystore](../services/energystore.md) — BadgerDB storage format
 - [services/postgres](../services/postgres.md) — cluster setup, user roles
 - [reference/obis-codes](../reference/obis-codes.md) — energy-data semantics

@@ -6,12 +6,12 @@ The central Go service. Owns the master-data domain (participants, metering poin
 
 | | |
 |---|---|
-| Language | Go |
-| Framework | net/http + chi (or comparable router) |
-| Runtime | distroless container |
-| State | PostgreSQL schemas `base` and `eda` |
-| Bus | MQTT subscriber (eda-xp publishes) |
-| Auth | JWT verify against Keycloak JWKS |
+| Language | Go 1.25 |
+| Framework | `net/http` + gorilla/mux v1.8.1; GraphQL via gqlgen v0.17.90 at `/query` |
+| Runtime | `golang:1.25` container (not distroless) |
+| State | PostgreSQL, schema `base` |
+| Bus | MQTT subscriber (eda-xp publishes), eclipse/paho.mqtt.golang v1.5.1 |
+| Auth | JWT verify via coreos/go-oidc (RS256) |
 
 ## Responsibilities
 
@@ -22,38 +22,35 @@ The central Go service. Owns the master-data domain (participants, metering poin
 
 ## REST API
 
-The customer SPA addresses the backend with a tenant-scoped URL prefix:
+Routes are mounted under flat, resource-scoped path prefixes (gorilla/mux subrouters): `/eeg`, `/participant`, `/meteringpoint`, `/process`, `/master`, and `/query` (GraphQL). There is no per-tenant URL prefix.
 
-```
-/eeg/v2/<ecId>/...
-```
+The tenant is supplied out-of-band via the `tenant` (or `X-Tenant`) HTTP header. The middleware verifies the header value is present in the JWT's `tenant` claim (a string array, compared case-insensitively) before dispatching.
 
-`<ecId>` is the EEG's `community_id`. The middleware extracts it, verifies it is in the JWT's `tenant` claim, and dispatches.
-
-Conventional endpoints:
+Representative endpoints:
 
 | Path | Method | Auth | Purpose |
 |------|--------|------|---------|
-| `/eeg/v2/<ecId>/participants` | GET | EEG_ADMIN | list members |
-| `/eeg/v2/<ecId>/participants/<id>` | GET | self or EEG_ADMIN | one member |
-| `/eeg/v2/<ecId>/metering-points` | GET / POST | EEG_ADMIN | manage Zählpunkte |
-| `/eeg/v2/<ecId>/metering-points/<id>/activate` | POST | EEG_ADMIN | triggers `EC_REQ_ONL` |
-| `/api/meteringpoint/changepartitionfactor` | POST | EEG_ADMIN | bulk request: triggers `EC_PRTFACT_CHANGE` / `ANFORDERUNG_CPF` per grid operator |
-| `/eeg/v2/<ecId>/processhistory` | GET | EEG_ADMIN | paginated history |
-| `/health`, `/ready` | GET | none | k8s probes |
+| `/eeg` | GET / POST | user / admin | read or update the EEG record |
+| `/participant` | GET | admin (all) or user (self) | list members or member-self lookup |
+| `/participant/{id}` | PUT | admin | update a member |
+| `/meteringpoint/changepartitionfactor` | POST | admin | bulk request: triggers `EC_PRTFACT_CHANGE` / `ANFORDERUNG_CPF` per grid operator |
+| `/process/history` | GET | user | paginated process history |
+| `/query` | POST | per-resolver | GraphQL endpoint |
+
+!!! note
+    There are no dedicated `/health` or `/ready` endpoints — no HTTP health endpoint exists for k8s probes.
 
 ## Auth
 
-The JWT is parsed into a `PlatformClaims` struct. `access_groups` is checked against an `adminGroups` map. Two middlewares wrap routes:
+The JWT is verified with coreos/go-oidc (RS256, issuer-side validation) and parsed into a `PlatformClaims` struct. Authorization is driven by the `realm_access.roles` claim, with the roles `admin`, `user`, and `superuser`. Three middlewares wrap routes:
 
 | Middleware | Effect |
 |------------|--------|
-| `ConditionProtect(adminHandler, userHandler)` | calls `adminHandler` if `IsAdmin()`, otherwise `userHandler` |
-| `AdminOnly(handler)` | returns 403 to non-admins |
+| `Protect(handler)` | requires the `admin` role |
+| `ConditionProtect(adminHandler, userHandler)` | calls `adminHandler` if the `admin` role is present, otherwise `userHandler` |
+| `AdminOnly(handler)` | returns 403 to callers without the `admin` role |
 
-`adminGroups` contains `EEG_ADMIN` and `vfeeg-superuser`. Both with and without leading slash are accepted.
-
-`aud` is parsed as a `string`. A user holding client roles on a foreign Keycloak client will have `aud` resolved as an array, breaking the parse. See [Architecture / Authentication](../architecture/auth.md) for the "audience caveat" details.
+The `access_groups` claim is parsed into the struct but is **not** used for authorization. The `azp` claim is mapped to an `Authorized` field; the service does **not** parse the `aud` claim itself, so there is no audience-array parse hazard.
 
 ## EDA subscriptions
 
@@ -62,15 +59,16 @@ The MQTT subscription list is hard-coded at startup. Anything not in the list is
 | Protocol | Handler | Effect |
 |----------|---------|--------|
 | `CR_MSG` | `protocolCrMsgHandler` | energy data + generic notifications; bridges per-slot values to the `eda/response/energy/<tenant>` topic for the energystore |
-| `CR_REQ_PT` | `protocolCrReqPtHandler` | participant-list response |
-| `EC_REQ_ONL` | `protocolEcReqOnlHandler` | Zählpunkt activation lifecycle |
+| `CR_REQ_PT` | `protocolCrReqPtHandler` | participant-list response; only writes history / notifications, does **not** change metering-point status |
+| `EC_REQ_ONL` | `protocolEcReqOnlHandler` | Zählpunkt online-activation lifecycle |
+| `EC_REQ_OFF` | `protocolEcReqOffHandler` | Zählpunkt offline-deactivation lifecycle |
 | `CM_REV_IMP` | `protocolCmRevImpHandler` | revocation, import direction |
 | `CM_REV_CUS` | `protocolCmRevImpHandler` | revocation by customer |
 | `CM_REV_SP` | `protocolCmRevImpHandler` | revocation by service provider |
 | `EC_PRTFACT_CHANGE` | `protocolEcPrtChangeHandler` | grid-operator response to a participation-factor change; three variants: `ANTWORT_CPF` (accepted, appends to `base.metering_partition_factor`), `ABLEHNUNG_CPF` (rejected, notification with response code), `ANFORDERUNG_CPF` (outbound echo, history only) |
 | `EC_PODLIST` | `protocolEcPodListHandler` | per-grid-operator metering-point list response |
 
-Handlers pattern-match on `MessageCode` (not version) and update `base.metering_point.status`, append to `base.processhistory`, and create notifications.
+Handlers pattern-match on `MessageCode` (not version). Depending on the message they append to `base.processhistory`, create notifications, and — for the lifecycle handlers — update `base.metering_point.status`. Not every handler touches metering-point status (e.g. `CR_REQ_PT` only writes history and notifications).
 
 ### Outbound EDA caveats
 
@@ -92,27 +90,33 @@ When adding support for a new EDA protocol or message code, the subscription lis
 | Schema | Tables (key) | Operation |
 |--------|--------------|-----------|
 | `base` | `participant`, `metering_point`, `eeg`, `tariff`, `contract`, `processhistory`, `notification` | read/write |
-| `eda` | message storage shared with eda-xp | read/write (process-history side) |
 
-DB connection comes from a Kubernetes Secret. The Go layer uses `database/sql` with `lib/pq`. SQL is built with `goqu`.
+The Go layer talks to PostgreSQL via the jackc/pgx v5 driver together with jmoiron/sqlx, and SQL is built with doug-martin/goqu. Schema migrations are embedded from `migrations/` and run automatically on startup via golang-migrate v4 (`MigrateDB()` in `server.go`).
 
 Caveats from operational experience:
 
 - `goqu` `.Select(&struct)` does **not** respect `db:"-"` on nested struct fields the way `sqlx` does. Nested structs trigger LEFT JOINs on sub-selects. Use explicit field lists for nested types.
-- `.Prepared(true).ToSQL()` emits `?` placeholders, which `lib/pq` rejects. Use `.ToSQL()` without `Prepared` for queries that are concatenated into the final SQL.
+- `.Prepared(true).ToSQL()` emits `?` placeholders. Use `.ToSQL()` without `Prepared` for queries that are concatenated into the final SQL.
 
 ## Config
 
-Environment variables (typical):
+Configuration is loaded with spf13/viper. Environment variables use the prefix `VFEEG_BACKEND_` with config-key dots mapped to underscores. Logging is via logrus.
 
 | Variable | Purpose |
 |----------|---------|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASS` | PostgreSQL connection |
-| `KEYCLOAK_URL`, `KEYCLOAK_REALM` | JWKS source |
-| `MQTT_HOST`, `MQTT_PORT`, `MQTT_USER`, `MQTT_PASS` | broker connection |
+| `VFEEG_BACKEND_DATABASE_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_DBNAME` | PostgreSQL connection |
+| `VFEEG_BACKEND_DATABASE_MAXOPENCONNS` / `_MAXIDLECONNS` / `_CONNMAXLIFETIME` | connection-pool tuning |
+| `VFEEG_BACKEND_DATABASE_PASSWORD_FILE` | path to a file the entrypoint reads the DB password from |
+| `VFEEG_BACKEND_MQTT_HOST` / `_ID` / `_QOS` | MQTT broker connection |
+| `VFEEG_BACKEND_PORT` | HTTP listen port (default 9080) |
+| `VFEEG_BACKEND_GRPC_PROVIDER_PORT` | gRPC listen port (default 9092) |
+| `VFEEG_BACKEND_SERVICES_MAIL_SERVER` | mail server endpoint |
+| `VFEEG_BACKEND_FILE_CONTENT_BASEDIR` | base directory for file content |
+| `VFEEG_BACKEND_EDA_PROCESS_VERSIONS_*` | per-process EDA schema versions |
+| `KEYCLOAK_CONFIG` | path to the Keycloak client JSON |
 | `LOG_LEVEL` | `info` / `debug` |
 
-The exact names vary by version; consult the deployed `ConfigMap` for the authoritative list.
+Consult the deployed `ConfigMap` for the authoritative list.
 
 ## Secrets
 
@@ -123,8 +127,9 @@ The exact names vary by version; consult the deployed `ConfigMap` for the author
 
 ## Build and image
 
-- Source repository: `eegfaktura-backend` in the operating organization
-- Build: multi-stage Docker, distroless final image
+- Go module path: `at.ourproject/vfeeg-backend`
+- Binary: the Docker build produces `vfeeg-backend` (image `CMD ["vfeeg-backend","-configPath","/etc/backend/"]`); the local `Makefile` builds it as `master-backend`
+- Build: multi-stage Docker with a `golang:1.25` final image (not distroless); the container `EXPOSE`s 8080, while the app listens on the configurable `port` (default 9080) plus gRPC on 9092
 - Tag scheme: commit SHA
 
 ## Local development

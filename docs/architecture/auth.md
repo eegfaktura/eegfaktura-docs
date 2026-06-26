@@ -1,6 +1,6 @@
 # Authentication
 
-All eegfaktura services authenticate against a single Keycloak realm. There is no separate auth gateway — each backend independently verifies the JWT against Keycloak's JWKS and enforces its own role / tenant checks.
+All eegfaktura services authenticate against a single Keycloak realm. There is no separate auth gateway — Keycloak signs every token (RS256), and each backend is an independent RS256 validator that enforces its own role / tenant checks. Services obtain the signing key either by fetching JWKS or from a configured public-key / cert file (see the per-service table below).
 
 ## Keycloak realm
 
@@ -54,8 +54,8 @@ Notes:
 
 - Group names appear with a leading slash (`/EEG_ADMIN`). Backends accept both forms.
 - Two claim names carry the same group list: `access_groups` (Go backends, `PlatformClaims` struct) and `groups` (admin-web SPA). Two `oidc-group-membership-mapper` instances populate both, with identical values.
-- `tenant` is a JSON array. A single-tenant user has one entry; a `vfeeg-superuser` has all tenants they can access. The mapper has `multivalued=true` and `aggregate.attrs=true`.
-- `aud` is a string. Customer Go backends parse it as `string`, not array — see the "audience" caveat below.
+- The tenant claim key is `tenant` (lowercase, singular) and carries a JSON string array. A single-tenant user has one entry; a `vfeeg-superuser` has all tenants they can access. The mapper has `multivalued=true` and `aggregate.attrs=true`. Tenant comparison is case-insensitive across services.
+- `aud` is resolved by Keycloak. The Go backends rely on their OIDC library (coreos/go-oidc) for audience handling and do not parse `aud` themselves; admin-backend explicitly requires `at.ourproject.vfeeg.admin` and filestore validates against `JWT_AUDIENCE` (default `account`).
 
 ## Required mappers on the customer client
 
@@ -73,20 +73,21 @@ Each backend enforces auth independently.
 
 | Service | Mechanism | Critical input |
 |---------|-----------|----------------|
-| **backend** (Go) | JWT verify against JWKS, `ConditionProtect` / `AdminOnly` middleware | `access_groups` for role, `tenant` claim matched against route's tenant scope |
-| **billing** (Java / Spring) | Spring Security JWT, `hasRole(EEG_ADMIN)` | requires `EEG_ADMIN` in groups; `Tenant` HTTP header validated |
-| **energystore** (Go) | JWT verify, custom middleware | `X-Tenant` header must be in JWT `tenant` array |
-| **filestore** (Python) | PyJWT verify | requires Keycloak's **public key** in PEM form (not the X.509 cert) |
-| **admin-backend** (Scala / Pekko) | Pekko-HTTP JWT directive | `aud` array must contain `at.ourproject.vfeeg.admin` |
+| **backend** (Go) | RS256 verify via coreos/go-oidc v3 (issuer-side), `ConditionProtect` / `AdminOnly` middleware | authorization from `realm_access.roles` (admin/user/superuser); `tenant` claim (string array, case-insensitive) matched against route's tenant scope. `azp` is mapped to an internal field; `access_groups` is parsed but unused for authz |
+| **billing** (Java / Spring) | RS256 via Auth0 java-jwt, reading an X.509 cert from `JWT_PUBLICKEYFILE` (converted to an `RSAPublicKey`), `hasRole(EEG_ADMIN)` | requires `EEG_ADMIN` in groups; `Tenant` HTTP header validated. No baked-in PEM — restart needed on cert change |
+| **energystore** (Go) | RS256 via coreos/go-oidc + golang-jwt v4; key from `ENERGYSTORE_JWT_PUBKEYFILE`, Keycloak config via `KEYCLOAK_CONFIG` | `X-Tenant` header must be in JWT `tenant` array |
+| **filestore** (Python) | RS256 via PyJWT; public key from `JWT_KEY_FILE` (env) → internal `JWT_PUBLIC_KEY_FILE` setting | requires Keycloak's **public key** in PEM form (not the X.509 cert); validates `aud` against `JWT_AUDIENCE` (default `account`) |
+| **admin-backend** (Scala / Pekko) | Nimbus JOSE+JWT, Keycloak JWKS via `RemoteJWKSet` | `aud` must contain `at.ourproject.vfeeg.admin` |
 
-### "audience" caveat
+### Audience handling
 
-The customer-side Go backends declare `aud` as `string`. If a user is granted client roles on a foreign client, Keycloak resolves additional audiences and `aud` becomes an array, breaking JSON parsing. Practical consequences:
+The customer-side Go backends do not parse `aud` themselves — audience handling is left to their OIDC library (coreos/go-oidc), which accepts both a single string and an array. Two services do enforce a specific audience explicitly: filestore validates `aud` against `JWT_AUDIENCE` (default `account`), and admin-backend requires `aud` to contain `at.ourproject.vfeeg.admin`.
 
-- A customer user must not hold client roles on other clients.
-- An admin user that needs both customer-side and admin-side access needs careful audience-mapper configuration.
+Practical consequence:
 
-In practice, separate users for customer-side and admin-side concerns avoid the issue.
+- An admin user that needs both customer-side and admin-side access needs careful audience-mapper configuration so that the admin-side audience is present where admin-backend expects it.
+
+In practice, separate users for customer-side and admin-side concerns keep the audience requirements clean.
 
 ## Member-data binding
 
@@ -126,7 +127,7 @@ The minimum steps to add a working user, by role:
 
 ## Billing JWT signing cert
 
-The billing service verifies JWTs using a PEM file at `/billing/zertifikat-pub.pem`, **not** by fetching JWKS at runtime. The cert must be Keycloak's current RS256 signing cert.
+The billing service verifies JWTs (Auth0 java-jwt) using an X.509 certificate read from the file named by `JWT_PUBLICKEYFILE`, which it converts to an `RSAPublicKey` — it does **not** fetch JWKS at runtime, and there is no baked-in PEM. The cert must be Keycloak's current RS256 signing cert, and billing must be restarted when the cert changes.
 
 Rotation procedure:
 
@@ -138,7 +139,7 @@ The `billing-cert-rotator` service automates this on a schedule.
 
 ## Filestore caveat
 
-Filestore uses PyJWT, which does **not** accept an X.509 certificate as the verification key — it requires the raw public key. Extract with `openssl x509 -pubkey -noout`. PyJWT also enforces the `aud` claim even without an explicit `audience=` parameter.
+Filestore uses PyJWT, which does **not** accept an X.509 certificate as the verification key — it requires the raw public key. Extract with `openssl x509 -pubkey -noout`. The key file is supplied via `JWT_KEY_FILE` (mapped to the internal `JWT_PUBLIC_KEY_FILE` setting). PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).
 
 ## Related
 

@@ -6,11 +6,13 @@ OIDC identity provider for the entire platform. One realm, four clients, four gr
 
 | | |
 |---|---|
-| Image | Keycloak (currently 25.x line) |
+| Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-keycloak:latest` |
 | Realm | `EEGFaktura` |
 | Token signing | RS256 |
 | State | PostgreSQL database `keycloak` |
 | Bootstrap | Jobs in `eegfaktura-bootstrap` chart |
+
+In the local docker-compose stack Keycloak runs the custom `ghcr.io/eegfaktura/eegfaktura-keycloak:latest` image, started with `start --optimized --import-realm`. The realm (`EEGFaktura`) is imported from `./keycloak/import`. It publishes the main port `8080` and the management port `9181` (`KC_HTTP_MANAGEMENT_PORT`), and runs with `KC_PROXY=edge` and `KC_HOSTNAME_STRICT=false` for local use.
 
 For the auth contract (clients, mappers, JWT claims, role behavior), see [Architecture / Authentication](../architecture/auth.md). This page covers the **deployment and operational** side.
 
@@ -74,7 +76,7 @@ When Keycloak runs behind an ingress, the realm setting `frontendUrl` must match
 
 ## Build and image
 
-Production typically uses the upstream Keycloak image. Custom themes / SPIs can be layered in a downstream build.
+The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-keycloak:latest`, with the realm and any themes / SPIs baked in. Production may use a different image (e.g. an upstream Keycloak base with custom themes / SPIs layered in a downstream build).
 
 ## Operational notes
 

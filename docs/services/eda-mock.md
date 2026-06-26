@@ -1,16 +1,19 @@
 # eda-mock
 
+!!! warning "Not a real service in this repository — conceptual page"
+    There is **no** `eda-mock` source in or near the eda-xp repository; the only `mock` code in eda-xp is test-fixture (`EmailMock`). The currently deployed `eegfaktura-eda-mock` (in the platform Helm charts) is **not** a Scala stub at all — it is two `traefik/whoami` containers (ports 6060 and 6090) that simply echo HTTP requests. It does **not** publish synthetic MQTT messages, merge conversation state, or stub EDA process flows. The sections below describe the *concept* of an EDA mock that an environment without a real PONTON link would need; they do not reflect the behaviour of the deployed placeholder. Verify against the actual chart before relying on any specific behaviour.
+
 A stub of the EDA gateway for environments without a real PONTON link. Lets the rest of the stack run end-to-end (Zählpunkt activation, energy-data flow, participation-factor changes) without involving the network operator.
 
 ## At a glance
 
 | | |
 |---|---|
-| Language | Scala |
-| Role | drop-in stand-in for `eda-xp` + PONTON |
-| Inbound | none from external (no PONTON) |
-| Outbound | MQTT publish to the same topic shape as eda-xp |
-| State | typically stateless / minimal |
+| Concept | drop-in stand-in for `eda-xp` + PONTON |
+| Deployed reality | `traefik/whoami` echo containers (ports 6060, 6090) — see warning above |
+| Inbound (concept) | none from external (no PONTON) |
+| Outbound (concept) | MQTT publish to the same topic shape as eda-xp |
+| State (concept) | typically stateless / minimal |
 
 ## When to use
 
