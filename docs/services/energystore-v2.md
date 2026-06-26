@@ -5,7 +5,7 @@ Stateless Go service that stores per-period energy time-series in **TimescaleDB*
 !!! info "Status"
     - **Pilot**: live, in production-equivalent setup (PR #41 + ADR-0010/0011)
     - **Production cutover**: planned, blocked by clarifying open architecture decisions — see [Cutover open questions](#cutover-open-questions) below
-    - **Public source**: [`gemeinstrom/eegfaktura-energystore-v2`](https://github.com/gemeinstrom/eegfaktura-energystore-v2)
+    - **Public source**: [`vfeeg-development/eegfaktura-energystore-v2`](https://github.com/vfeeg-development/eegfaktura-energystore-v2)
 
 ## At a glance
 

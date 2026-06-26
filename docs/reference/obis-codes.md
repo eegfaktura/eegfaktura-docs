@@ -110,7 +110,7 @@ eegfaktura uses the abbreviated `<A-B>:<C.D.E>` prefix followed by a vendor toke
 
 The Austrian ElWG that takes full effect on **2026-10-01** is expected to introduce additional shared-energy forms (peer-to-peer contracts under §68, self-supply across multiple meters of one member). EDA has already introduced T-/R-variants for multi-participation as of 2024-04-08 — those are accepted by both v1 and v2.
 
-The exact OBIS-code surface for the new shared forms is not yet published by E-Control / ebUtilities. Phase 2 of the v2 schema work (track in [energystore-v2 issue #40](https://github.com/gemeinstrom/eegfaktura-energystore-v2/issues/40)) will introduce a per-allocation dimension so the same metering point can carry several parallel allocation streams.
+The exact OBIS-code surface for the new shared forms is not yet published by E-Control / ebUtilities. Phase 2 of the v2 schema work will introduce a per-allocation dimension so the same metering point can carry several parallel allocation streams.
 
 Until the new spec lands, the canonical 4-/5-code set above remains authoritative.
 
