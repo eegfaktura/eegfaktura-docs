@@ -136,10 +136,6 @@ Storage shape:
 
 The energy data shape is documented in detail in [reference/obis-codes](../reference/obis-codes.md). See also [services/energystore](../services/energystore.md) for the on-disk format and replication caveats.
 
-## Backups
-
-PostgreSQL backups are deployment-specific (typically CloudNativePG with WAL streaming to object storage). energystore PVCs need separate snapshotting because the KV store is not part of the PostgreSQL backup chain — energy time-series must be restored from a PVC snapshot or re-imported via EDA.
-
 ## Related
 
 - [services/backend](../services/backend.md) — `base` and `eda` schema details
