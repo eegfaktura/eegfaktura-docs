@@ -72,11 +72,7 @@ A separate Postgres deployment hosts the TimescaleDB-backed time-series data for
 - **Continuous aggregates** for the hourly / daily / monthly rollups that settlement queries consume.
 - **pgBouncer** in front in production deployments.
 
-The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG (CNPG)** with primary + async read-replica + WAL-archive-to-S3. CNPG is referenced in `konzept.md` §4 but not yet deployed (see `feedback_cnpg_not_yet_in_stack`).
-
-## Backups
-
-Backup strategy is deployment-specific. The supported pattern is CloudNativePG with WAL streaming to S3-compatible object storage. Manual `pg_dump` is fine for dev / small instances.
+The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG (CNPG)** with primary + async read-replica. CNPG is referenced in `konzept.md` §4 but not yet deployed (see `feedback_cnpg_not_yet_in_stack`).
 
 ## Operational notes
 
