@@ -84,7 +84,6 @@ nav:
           - services/postgres.md
           - services/mosquitto.md
           - services/mailpit.md
-          - services/billing-cert-rotator.md
   - Reference:
       - reference/index.md
       - Glossary: reference/glossary.md

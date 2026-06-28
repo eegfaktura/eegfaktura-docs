@@ -67,7 +67,7 @@ Caddy in the customer-web container does **not** proxy these. The Ingress (typic
 
 ## Runtime configuration
 
-The SPA fetches `/config/keycloak-config.json` at startup; Caddy serves it from `/srv` with template processing (keys `auth-server-url`, `realm`, `resource` — the `resource` is the client id `at.ourproject.vfeeg.app`). In cluster the file is overridden by a mounted ConfigMap.
+The SPA fetches `/config/keycloak-config.json` at startup; Caddy serves it from `/srv` with template processing (keys `auth-server-url`, `realm`, `resource` — the `resource` is the client id `at.ourproject.vfeeg.app`).
 
 Backend service URLs are baked in at build time via `VITE_API_SERVER_URL`, `VITE_ENERGY_SERVER_URL`, `VITE_BILLING_SERVER_URL`, and `VITE_FILESTORE_SERVER_URL`.
 

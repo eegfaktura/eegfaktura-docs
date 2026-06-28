@@ -129,14 +129,6 @@ The minimum steps to add a working user, by role:
 
 The billing service verifies JWTs (Auth0 java-jwt) using an X.509 certificate read from the file named by `JWT_PUBLICKEYFILE`, which it converts to an `RSAPublicKey` — it does **not** fetch JWKS at runtime, and there is no baked-in PEM. The cert must be Keycloak's current RS256 signing cert, and billing must be restarted when the cert changes.
 
-Rotation procedure:
-
-1. Fetch the cert from Keycloak's JWKS endpoint and convert to PEM (full procedure: see [services/billing-cert-rotator](../services/billing-cert-rotator.md)).
-2. Update the `ConfigMap` mounted into the billing pod at the path above.
-3. Restart billing.
-
-The `billing-cert-rotator` service automates this on a schedule.
-
 ## Filestore caveat
 
 Filestore uses PyJWT, which does **not** accept an X.509 certificate as the verification key — it requires the raw public key. Extract with `openssl x509 -pubkey -noout`. The key file is supplied via `JWT_KEY_FILE` (mapped to the internal `JWT_PUBLIC_KEY_FILE` setting). PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).

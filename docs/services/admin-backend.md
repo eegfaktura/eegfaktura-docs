@@ -106,15 +106,6 @@ Uses Slick 3.5.1 with a HikariCP connection pool and the PostgreSQL driver, read
 !!! note "Pekko version pinning"
     `pekko-discovery` is explicitly pinned to **1.2.1** to match the rest of Pekko. The Pekko gRPC sbt plugin (1.1.1) transitively pulls `pekko-discovery` 1.1.2, and the resulting mixed Pekko versioning crashes at runtime — keep the explicit pin.
 
-## Pre-public-ingress gating
-
-Before exposing admin-backend at a public ingress, two checks are mandatory:
-
-1. **Audience mapper is correctly wired**, so that customer-token holders cannot reach admin endpoints by chance.
-2. **AGPL § 13 footer** is present in the SPA referencing the admin-backend source.
-
-Both apply equally to admin-web.
-
 ## Related
 
 - [services/admin-web](admin-web.md) — the SPA client

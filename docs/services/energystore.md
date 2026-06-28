@@ -112,12 +112,7 @@ There is no role check beyond authenticated-and-tenant-matches — `EEG_USER` an
 
 ## Persistence
 
-Badger persists to the configured `persistence.path` (container `VOLUME /opt/rawdata`; production `config-prod.yaml` uses `/opt/energy/rawdata`), mounted from a PVC. The PVC is the single source of truth for energy data. energystore does **not** own a PostgreSQL schema. Two operational consequences:
-
-- Deleting the namespace or PVC destroys this data.
-- The PVC is RWO (single-writer). energystore is a single-replica deployment.
-
-The PVC dominates the storage footprint for the namespace.
+Badger persists to the configured `persistence.path` (container `VOLUME /opt/rawdata`), mounted from a PVC. The PVC is the single source of truth for energy data — energystore does **not** own a PostgreSQL schema.
 
 ## Config
 

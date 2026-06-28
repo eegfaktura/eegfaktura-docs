@@ -79,8 +79,6 @@ volumes:
       name: eegfaktura-jwt-cert
 ```
 
-On Keycloak re-import or key rotation, the ConfigMap must be regenerated and the billing pod restarted. This loop is automated at the platform level (not in the billing source) by the `billing-cert-rotator` CronJob — see [services/billing-cert-rotator](billing-cert-rotator.md).
-
 ## Tenant header
 
 Billing endpoints require a `Tenant` HTTP header in addition to the JWT. The header value is matched against the JWT's claim. The exact match rule is the legacy `tenant == rcNumber` convention — see notes under "Tenant convention" below.
@@ -156,6 +154,5 @@ In smaller / dev deployments, set `-Xmx512m` or so to keep idle memory reasonabl
 
 - [Architecture / Authentication](../architecture/auth.md) — `hasRole` + cert mount
 - [Architecture / Databases](../architecture/databases.md) — Flyway + pg_dump conflict
-- [services/billing-cert-rotator](billing-cert-rotator.md) — automated cert refresh
 - [services/energystore](energystore.md) — energy-data source
 - [reference/obis-codes](../reference/obis-codes.md) — billing-relevant values (G.03, G.01T, P.01T)

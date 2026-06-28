@@ -58,12 +58,6 @@ The auth file is mounted via `ConfigMap` / `Secret`. Each connecting service has
 
 ACLs are configured in `mosquitto.conf` (or an `acl_file` referenced from it).
 
-## Persistence
-
-Mosquitto persists its queue to a PVC. Without persistence (or with an undersized PVC), a broker restart loses in-flight messages.
-
-The PVC is RWO; Mosquitto is a single-replica StatefulSet.
-
 ## Config
 
 The main `mosquitto.conf` is typically mounted from a `ConfigMap`. Key directives:
@@ -81,10 +75,8 @@ The main `mosquitto.conf` is typically mounted from a `ConfigMap`. Key directive
 
 An optional `mosquitto-exporter` sidecar (e.g. `sapcc/mosquitto-exporter`) exposes Prometheus metrics on a separate port. Useful for connection-count, message-rate, and queue-depth dashboards.
 
-## Operational notes
+## Delivery semantics
 
-- A "connection refused" from a backend that just started usually means the broker is reachable on TCP but has not yet accepted the auth — surface this in liveness/readiness probes by checking subscription state, not raw TCP.
-- ACL changes require a Mosquitto restart in default config.
 - The broker does **not** distinguish "no subscriber" from "delivered" — publishing to a topic nobody listens to silently succeeds. This is the dominant failure mode when adding new EDA protocol support; see [Architecture / Messaging](../architecture/messaging.md) gap point #5.
 
 ### MQTT 5 vs 3.1.1 — Shared Subscriptions caveat

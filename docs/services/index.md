@@ -37,6 +37,5 @@ Each service page covers:
 - **[postgres](postgres.md)** — relational database
 - **[mosquitto](mosquitto.md)** — MQTT broker
 - **[mail (Postfix relay)](mailpit.md)** — outbound SMTP relay (`eegfaktura-postfix`)
-- **[billing-cert-rotator](billing-cert-rotator.md)** — JWT signing cert rotation
 
 > **Note:** This index lists the services as currently deployed. Per-service pages cover responsibilities, APIs, configuration, auth, database access, and inter-service dependencies.
