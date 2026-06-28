@@ -132,10 +132,6 @@ REST surface mirrors v1's `/eeg/v2/{ecid}/...` endpoints with the same wire shap
 
 The `/excel/report/download` endpoint produces an XLSX with the v1-compatible sheet layout; wire-shape compatibility with v1 was verified during the pilot rollout.
 
-## Scaling note
-
-The v2 app tier is stateless and intentionally lightweight: per-message work is decode + upsert, no in-process state, no range-read-merge. The load-bearing component is `postgres-energy` (TimescaleDB), not the v2 pod.
-
 ## Cutover open questions
 
 The v2 implementation is feature-complete for the cutover, but three open architecture decisions remain:

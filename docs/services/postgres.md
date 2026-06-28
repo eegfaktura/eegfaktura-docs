@@ -59,10 +59,6 @@ Each application service has its own database user, scoped to its schemas. Conne
 
 Schema creation requires a higher-privilege user (granted `CREATE` on the database and ownership of the per-service schemas); the per-service users are then used for normal operation.
 
-## Persistence
-
-PostgreSQL uses a RWO PVC. `base.processhistory` and the `eda.*` workflow tables grow with EDA traffic; `base.processhistory` has no retention policy yet (partitioning + retention are planned). Deleting the PVC destroys the database.
-
 ## postgres-energy (TimescaleDB, energystore-v2 only)
 
 A separate Postgres deployment hosts the TimescaleDB-backed time-series data for [energystore-v2](energystore-v2.md). Architectural choices:
@@ -73,16 +69,6 @@ A separate Postgres deployment hosts the TimescaleDB-backed time-series data for
 - **pgBouncer** in front in production deployments.
 
 The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG (CNPG)** with primary + async read-replica. CNPG is referenced in `konzept.md` §4 but not yet deployed (see `feedback_cnpg_not_yet_in_stack`).
-
-## Operational notes
-
-- The `eda` schema is the second-largest after `base` in production instances. `eda.message` (or similar) grows linearly with EDA traffic.
-- `base.processhistory` benefits from periodic archival in long-running instances.
-- Keycloak's `offline_user_session` grows with idle sessions; periodic cleanup is recommended.
-
-## fsGroup caveat
-
-On some clusters / storage classes, the PostgreSQL container's `fsGroup` setting must match the PVC's mount group, otherwise the PG data directory is not writable. Misconfigured fsGroup is a frequent first-boot failure.
 
 ## Related
 

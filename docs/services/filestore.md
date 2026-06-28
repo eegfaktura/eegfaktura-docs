@@ -99,11 +99,9 @@ Migrations are run by Alembic (`alembic upgrade head`) on startup, before `pytho
 - Source: `eegfaktura-filestore`
 - Build: Docker (`python:3.10-slim-bullseye` base)
 
-## Operational notes
+## Source lineage caveat
 
-- The PVC is RWO; filestore is a single-replica deployment.
-- Deleting the PVC destroys uploaded blobs.
-- Source lineage drift: the production-deployed filestore historically lagged the public-clone source by years. When recovering or upgrading, verify the running image's `.git` config to see which upstream produced it, rather than assuming the public mirror.
+The production-deployed filestore historically lagged the public-clone source by years. When recovering or upgrading, verify the running image's `.git` config to see which upstream produced it, rather than assuming the public mirror.
 
 ## Related
 

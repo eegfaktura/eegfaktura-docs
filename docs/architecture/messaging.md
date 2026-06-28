@@ -150,7 +150,7 @@ Production deployments typically increase persistence + QoS for the EDA inbound 
 
 ## MQTT protocol version
 
-For non-shared subscriptions either MQTT 3.1.1 or MQTT 5 works. For **Shared Subscriptions** (`$share/<group>/<topic>`, used by [energystore-v2](../services/energystore-v2.md) to spread the load across replicas), MQTT 5 is mandatory — the broker silently accepts the subscribe pattern from a 3.1.1 client but never matches any publish to it. New Go subscribers should use `github.com/eclipse/paho.golang`, not `github.com/eclipse/paho.mqtt.golang`. See [services/mosquitto](../services/mosquitto.md#operational-notes).
+For non-shared subscriptions either MQTT 3.1.1 or MQTT 5 works. For **Shared Subscriptions** (`$share/<group>/<topic>`, used by [energystore-v2](../services/energystore-v2.md) to spread the load across replicas), MQTT 5 is mandatory — the broker silently accepts the subscribe pattern from a 3.1.1 client but never matches any publish to it. New Go subscribers should use `github.com/eclipse/paho.golang`, not `github.com/eclipse/paho.mqtt.golang`. See [services/mosquitto](../services/mosquitto.md#mqtt-5-vs-311-shared-subscriptions-caveat).
 
 ## Related
 

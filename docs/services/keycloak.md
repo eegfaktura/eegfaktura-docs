@@ -69,13 +69,6 @@ When Keycloak runs behind an ingress, the realm setting `frontendUrl` must match
 
 The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-keycloak:latest`, with the realm and any themes / SPIs baked in. Production may use a different image (e.g. an upstream Keycloak base with custom themes / SPIs layered in a downstream build).
 
-## Operational notes
-
-- Realm re-import overwrites the realm. Any user-side changes (extra users, manually-set attributes) are wiped. The `kc-users` Job re-creates the bootstrap users; everything else must be re-applied externally.
-- On Keycloak key rotation, the [billing-cert-rotator](billing-cert-rotator.md) must run before billing reads the new key, otherwise tokens fail verification.
-- The Keycloak pod's restart loop on a fresh deployment is usually attributable to the database not being ready. The `initContainer` pattern on KC-dependent Jobs (`curl /realms/master`) is the right wait probe; the KC pod itself can take a minute or two to be reachable after PG comes up.
-
 ## Related
 
 - [Architecture / Authentication](../architecture/auth.md) — the full auth contract
-- [services/billing-cert-rotator](billing-cert-rotator.md) — JWT cert refresh
