@@ -89,6 +89,21 @@ Practical consequence:
 
 In practice, separate users for customer-side and admin-side concerns keep the audience requirements clean.
 
+## Machine-to-machine access (HTTP Basic / `ProtectApi`)
+
+Alongside the RS256 bearer path above, two Go services expose a second middleware, `ProtectApi`, for non-interactive / server-to-server callers. Instead of validating a bearer JWT, `ProtectApi` reads an `Authorization: Basic base64(username:password)` header and performs the password exchange against Keycloak server-side (`AuthenticateUserWithPassword`, OIDC `grant_type=password`). It then applies the same tenant check on the resulting claims, so the caller never handles a JWT directly.
+
+| Service | `ProtectApi` routes | Auth header | Tenant header |
+|---------|---------------------|-------------|---------------|
+| **backend** (Go) | `GET /master/masterdata`, `POST /master/updatepartfact` (`api/apiController.go`) | `Authorization: Basic …` | `X-Tenant` |
+| **energystore** (Go) | `POST /query/rawdata`, `POST /query/{ecid}/metadata` (`rest/energy.go`) | `Authorization: Basic …` | `X-Tenant` |
+
+Notes:
+
+- The Basic credentials are an ordinary Keycloak username/password; the service exchanges them for a token internally. The user still needs the appropriate group / tenant for the operation.
+- This path depends on the Keycloak client used for the server-side exchange permitting the Resource Owner Password Credentials grant ("Direct Access Grants"). Public SPA clients (`…app`, `…admin`) commonly have it disabled, in which case the operator must designate a client that allows the grant.
+- Routes guarded by `Protect` (bearer-only) do **not** accept Basic. In particular the participant endpoints — `POST /participant`, `PUT /participant/{id}`, `POST /participant/{id}/confirm`, `DELETE /participant/v2/{id}` (`api/participantController.go`) — require a bearer JWT with `EEG_ADMIN`; a Basic request returns HTTP 403. There is currently no `ProtectApi` equivalent for participant writes.
+
 ## Member-data binding
 
 For endpoints that return "own participant data" (a non-admin member viewing their dashboard), the backend matches the JWT's `email` or `preferred_username` against `base.participant.email` / `base.participant.id` in the database.
