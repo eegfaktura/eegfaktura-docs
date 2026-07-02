@@ -110,7 +110,7 @@ Configuration is loaded with spf13/viper. Environment variables use the prefix `
 | `VFEEG_BACKEND_MQTT_HOST` / `_ID` / `_QOS` | MQTT broker connection |
 | `VFEEG_BACKEND_PORT` | HTTP listen port (default 9080) |
 | `VFEEG_BACKEND_GRPC_PROVIDER_PORT` | gRPC listen port (default 9092) |
-| `VFEEG_BACKEND_SERVICES_MAIL_SERVER` | mail server endpoint |
+| `VFEEG_BACKEND_SERVICES_MAIL_SERVER` | gRPC endpoint of `eda-xp`'s `SendMailService` (member notifications; see [architecture/email](../architecture/email.md)) — **not** a direct SMTP host |
 | `VFEEG_BACKEND_FILE_CONTENT_BASEDIR` | base directory for file content |
 | `VFEEG_BACKEND_EDA_PROCESS_VERSIONS_*` | per-process EDA schema versions |
 | `KEYCLOAK_CONFIG` | path to the Keycloak client JSON |
