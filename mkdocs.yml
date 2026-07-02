@@ -65,6 +65,7 @@ nav:
       - Authentication: architecture/auth.md
       - Databases: architecture/databases.md
       - Messaging: architecture/messaging.md
+      - Notification e-mail: architecture/email.md
   - Services:
       - services/index.md
       - Backend Layer:
