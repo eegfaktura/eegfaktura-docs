@@ -37,12 +37,16 @@ flowchart LR
 
 | Sender | Path | Examples |
 |---|---|---|
-| **eegfaktura-backend** | renders template → gRPC `SendMailService` → relay | metering-point **activation** ("Aktivierung im Serviceportal"), **completion** ("Dein Zählpunkt ist aktiv") |
-| billing | its **own** SMTP config (`MAIL_*` env) → relay | run-completion, billing documents |
+| **eegfaktura-backend** | renders a Go `html/template` → gRPC `SendMailService` → relay | metering-point **activation** ("Aktivierung im Serviceportal"), **completion** ("Dein Zählpunkt ist aktiv") |
+| billing | renders a **FreeMarker** template → its **own** `JavaMailSender`/SMTP (`MAIL_*` env) → relay | run-completion, billing documents |
 | keycloak | its own SMTP → relay | password reset, e-mail verification |
 
 Only the backend uses the gRPC hop through `eda-xp`; billing and keycloak talk SMTP to the
-relay directly.
+relay directly. Note the template engines differ per sender: the backend uses Go
+`html/template` (see [Templates & conventions](#templates-conventions) below), while billing
+renders with **FreeMarker** (`BillingEmailDefaultTemplate.ftl`, `MAIL_NO_REPLY_TO` sender,
+`Cc:` the issuer). Any per-tenant mail-text editing therefore has to be designed per path — the
+two do not share a template store.
 
 ## Templates & conventions
 
