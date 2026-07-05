@@ -48,6 +48,33 @@ renders with **FreeMarker** (`BillingEmailDefaultTemplate.ftl`, `MAIL_NO_REPLY_T
 `Cc:` the issuer). Any per-tenant mail-text editing therefore has to be designed per path — the
 two do not share a template store.
 
+## Recipient address handling
+
+All senders share **one address rule** (implemented per language, not via a shared library):
+after trimming outer unicode whitespace — including the non-breaking spaces `U+00A0` / `U+202F`
+/ `U+2007` — per `;`-separated part, a valid address is `local@domain.tld` with an ASCII local
+part (`[a-zA-Z0-9._%+-]`), a TLD of at least two letters, and **no** TLD allowlist. A value that
+is empty after trimming means "no e-mail" — not an error, no send. Canonical stored form:
+`;`-joined without spaces.
+
+- **Write paths (backend, server-side — not only the web form):** the rule is enforced on every
+  path that persists a member or EEG e-mail — participant create / update / partial-update
+  (`contact.email`), the EEG office address (`eeg.Email`), and the Excel master-data import.
+  Invalid addresses are rejected (API) or imported without e-mail plus an import-log entry
+  (Excel); a value that trims to empty is stored as `NULL` so the send-path `Valid` guard stays
+  meaningful.
+- **Send paths:** both backend senders (`SendMail`, `SendMailWithAttachment`) normalise `to`/`cc`
+  and send the **normalised** value. `eda-xp` splits on `;`, delivers to the valid recipients,
+  and returns the refused ones in the additive proto field `SendMailReply.rejectedRecipients`
+  (backward compatible) so the backend can raise an admin notification instead of dropping them
+  silently; an address list with no valid recipient fails the request. billing normalises and
+  validates before building the `MimeMessage` — a rejected part on an **otherwise delivered**
+  mail (e.g. an invalid office `Cc:`) is a *warning* in the run protocol, **not** a `FEHLER`
+  (a delivered invoice must not trigger a manual re-send → duplicate invoices).
+- **Admin visibility:** failed sends surface through the existing `N_TYPE_ERROR` notification
+  system (web `/page/notifications`); the member detail pane shows an **"E-Mail ungültig"** badge
+  for stored addresses that fail the rule, so tenant admins can spot and correct them.
+
 ## Templates & conventions
 
 - Per-tenant templates under `/opt/storage/public/<tenant>/templates/`; if a **specific file**
