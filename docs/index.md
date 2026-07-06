@@ -14,6 +14,7 @@ A microservice-based platform that:
 
 ## Documentation map
 
+- **[Getting Started](getting-started.md)** — New here? Run the stack locally, make a first change, and understand zones, logs and the release path.
 - **[Architecture](architecture/index.md)** — How services fit together. Service topology, authentication flow, databases, messaging.
 - **[Services](services/index.md)** — One page per deployed service. Responsibilities, APIs, configuration, secrets, image provenance.
 - **[Reference](reference/index.md)** — Glossary (OBIS, EDA, EEG terminology), reference tables.
@@ -22,7 +23,7 @@ A microservice-based platform that:
 
 If you are…
 
-- **New to the codebase** — start with [Architecture / Service Overview](architecture/overview.md), then drill down to a specific service page.
+- **New to the codebase** — start with [Getting Started](getting-started.md), then [Architecture / Service Overview](architecture/overview.md), then drill down to a specific service page.
 - **Adding a feature to a single service** — go directly to the service page (`services/<name>.md`).
 - **Investigating auth issues** — see [Architecture / Authentication](architecture/auth.md).
 
