@@ -80,15 +80,14 @@ to backend services — never directly to a database (see
   section); the release stamps it to a version.
 - Conventional-commit style (`feat(scope): …`, `fix: …`, `docs: …`).
 
-## 4. Zones: Dev / Test / Prod
+## 4. Zones: Dev / Prod
 
-There are three quality zones. Only **Dev** is a public-cloud cluster with
-direct developer access; Test and Prod are on-prem and operator-gated.
+Two quality zones are in operation. **Dev** is a public-cloud cluster with
+direct developer access; **Prod** is on-prem and operator-gated.
 
 | Zone | Where | Access | Data |
 |---|---|---|---|
 | **Dev** | STACKIT SKE (`eu02`) | direct (kubeconfig) | synthetic / anonymized |
-| **Test** | on-prem | operator only | daily refresh from Prod *(deferred)* |
 | **Prod** | on-prem, ArgoCD/GitOps | operator only | production data |
 
 Full model:
@@ -155,4 +154,4 @@ ArgoCD) is documented in
 ## 8. Getting help
 
 Ask the team — bring the service, the zone, and the relevant log excerpt. When
-in doubt about whether a change affects Test/Prod, assume it might and ask first.
+in doubt about whether a change affects Prod, assume it might and ask first.
