@@ -21,6 +21,20 @@ Include the affected page (path under `docs/`) and, if possible, what the correc
   mkdocs build --strict
   ```
 
+## Publishing (maintainers)
+
+The site is built and deployed by the **Deploy MkDocs to Pages** workflow. This
+repository is currently a **fork**, and GitHub does not run `push`-triggered
+workflows on forks — so merging to `main` does **not** auto-publish. After
+merging a change under `docs/` (or `mkdocs.yml`), publish manually:
+
+```
+gh workflow run deploy.yml --repo eegfaktura/eegfaktura-docs --ref main
+```
+
+(or Actions tab → *Deploy MkDocs to Pages* → *Run workflow* → `main`). Changes
+outside `docs/`/`mkdocs.yml` don't affect the rendered site and need no deploy.
+
 ## Scope
 
 This repository contains **developer and maintainer documentation** (architecture, service behaviour, protocols, operational procedures). It is not an end-user manual, and it intentionally does not contain production sizing data, credentials, or instance-specific configuration.

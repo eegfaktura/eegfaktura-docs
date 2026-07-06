@@ -1,5 +1,12 @@
 name: Deploy MkDocs to Pages
 
+# NOTE: This repository is a fork. GitHub does not run push-triggered workflows
+# on forks, so the `push` trigger below does NOT fire on merges to main — deploy
+# manually after merging docs changes:
+#   gh workflow run deploy.yml --repo eegfaktura/eegfaktura-docs --ref main
+# (or Actions tab -> Run workflow). The `push` trigger is kept so auto-deploy
+# resumes automatically if the repo is ever detached from its fork network.
+# See CONTRIBUTING.md -> Publishing.
 on:
   push:
     branches: [main]
