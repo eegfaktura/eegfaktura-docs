@@ -18,7 +18,7 @@ not column positions**, so older templates keep working. The same file lives as
 a pinned regression fixture in the backend repo
 (`tests/260716-vorlage-import-stammdaten.xlsx`).
 
-!!! info "Behavior as of backend PR #34/#35"
+!!! info "Behavior as of backend PR #34/#35/#36"
     The date handling ("Mitglied seit", "registriert seit"), the
     "Zugeteilte Menge in Prozent" mapping, continue-on-error, the skipped-row
     notifications, the status/direction tolerance and the MitgliedsNr warnings
@@ -46,6 +46,7 @@ current `260716` template).
 | Column | Imported as | Notes |
 |---|---|---|
 | Netzbetreiber (A) | metering point `gridOperatorId` (+ name lookup) | row trigger; must match `AT`+digits, surrounding spaces are tolerated |
+| Gemeinschafts-ID (B) | validation only (not stored) | **required**: every row must carry the community id of the EEG you upload into (case-insensitive). A different id — the "wrong file / wrong community" mistake — or an **empty** cell rejects the row (reported once per distinct wrong id) |
 | PLZ / Ort / Straße / Hausnummer (C–F) | member resident + billing address **and** metering point address | one set of columns feeds all three |
 | Zählpunkt (G) | metering point id | must be exactly 33 characters, otherwise the row is rejected (reported) |
 | Energierichtung (H) | `CONSUMPTION` or `GENERATION` | empty defaults to `CONSUMPTION`; **any other value rejects the row (reported)** — a typo must not silently import a producer as consumer |
@@ -64,13 +65,16 @@ current `260716` template).
 | Zählpunktstatus (Z) | `ACTIVE` / `ACTIVATED` / `REGISTERED` → active member + active metering point; `NEW` → new, not yet activated | case-insensitive, surrounding spaces tolerated; any other value rejects the row (reported) |
 | registriert seit (AA) | metering point `registeredSince` and `activeSince` | text or date cell; empty → Jan 1 of the current year. For **online** (EDA-connected) EEGs `registeredSince` is always the import day |
 
-**Not imported:** Gemeinschafts-ID (B) is kept in the template as an
-organizational aid but is *not* validated against the target EEG —
-double-check you upload into the right community. Columns from **older
-templates** without a data model counterpart (Ortsgebiet,
-Stiege/Stock/Tür/Adresszusatz, Überschusseinspeisung, Energiequelle,
-Verteilungsmodell, Meter Codes) are ignored; they were removed from the
-`260716` template.
+**Not imported:** Columns from **older templates** without a data model
+counterpart (Ortsgebiet, Stiege/Stock/Tür/Adresszusatz, Überschusseinspeisung,
+Energiequelle, Verteilungsmodell, Meter Codes) are ignored; they were removed
+from the `260716` template.
+
+!!! tip "Where do I find my Gemeinschafts-ID?"
+    It is the community id (`AT…`-33 characters) shown in the EEG master data
+    ("Gemeinschafts-ID"). The template's sample row contains a placeholder id
+    and is therefore always rejected on real imports — replace it with your
+    own data.
 
 ## Adding metering points to an existing member { #re-import }
 
@@ -80,8 +84,8 @@ created manually or by an earlier import):
 1. Take the import template and add **one row for the new metering point**.
 2. Fill **"Name 1" and "Name 2" exactly as stored on the existing member**
    (character-for-character — the match is by name only).
-3. Fill the metering point columns (Zählpunkt, Energierichtung,
-   Zählpunktstatus, registriert seit, …) for the new ZP.
+3. Fill the metering point columns (Gemeinschafts-ID, Zählpunkt,
+   Energierichtung, Zählpunktstatus, registriert seit, …) for the new ZP.
 4. Upload the file for the same EEG.
 
 The importer detects the existing member by name and **only appends the
@@ -99,9 +103,10 @@ of the file is still imported.
 The import never aborts halfway: each member is imported in its own
 transaction. Problems are collected and delivered as an **admin notification**
 ("Excel Master Data Import") listing, per row: invalid e-mail addresses,
-invalid `Zählpunktstatus`, unknown `Energierichtung`, metering point ids ≠ 33
-characters, rows without a valid `Netzbetreiber`, unextractable names, and
-members whose database import failed. Duplicate `MitgliedsNr` values (within
+invalid `Zählpunktstatus`, unknown `Energierichtung`, missing/mismatching
+`Gemeinschafts-ID`, metering point ids ≠ 33 characters, rows without a valid
+`Netzbetreiber`, unextractable names, and members whose database import
+failed. Duplicate `MitgliedsNr` values (within
 the file, or already assigned to a different existing member) appear as
 **warnings** — those rows are still imported. Check the notification bell
 after every import.
@@ -114,5 +119,5 @@ after every import.
   rows may carry different numbers).
 - Re-imports **never update** existing members' master data (by design — the
   import is an initial-load and ZP-append tool, not a sync).
-- The Gemeinschafts-ID column is not checked against the EEG you upload into —
-  double-check you are logged into the right community before uploading.
+- Existing files that left the Gemeinschafts-ID column empty must fill it in
+  once — since the column is enforced, empty cells reject the row.
