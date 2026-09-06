@@ -41,8 +41,17 @@ follow its README. In short:
    described in the README.
 
 !!! note "Local images vs. building from source"
-    The Compose stack pulls the **published service images** — you do not need
-    to build anything to run the platform. When you *do* build a service from
+    The Compose stack pulls the **published release images** from
+    `ghcr.io/eegfaktura/*` — you do not need to build anything to run the
+    platform. The images are pinned to released versions rather than `latest`,
+    so a checkout describes one combination of services that has actually been
+    run together. This matters because services talk to each other over wire
+    formats that change (MQTT payload encoding, EDA process versions): a stack
+    that mixes an old image with a new one can start up cleanly and still not
+    work — energy data simply never arrives, with nothing in the logs pointing
+    at the cause. If you want to run a service you built yourself, override that
+    single service in `docker-compose.override.yml` rather than editing the
+    pinned versions. When you *do* build a service from
     source, some services have a code-generation step (e.g. `protoc` /
     `go generate` for the Go services, `sbt` for Scala). The `backend` is a
     normal source-built service like the other eight — see its
@@ -128,7 +137,17 @@ most common source of confusion:
   the released tag points at the identical digest that was tested.
 - **Prod (pinned):** the GitOps repo pins `vX.Y.Z` tags; ArgoCD syncs them. Prod
   never runs `latest`.
+- **Public release tier:** the dev tier is **private**, so promoting to prod also
+  copies the released digest to `ghcr.io/eegfaktura/<image>` (`vX.Y.Z` and
+  `latest`). That is the tier the Compose stack pulls from, and the only one
+  reachable without credentials.
 - An independent prod **image mirror** exists at `ghcr.io/marki4711/*`.
+
+!!! warning "Do not pull `:latest` from the dev tier"
+    Only the promoted `vX.Y.Z` tags are published publicly, and that is
+    deliberate: image visibility on GHCR is per *package*, not per *tag*, so
+    opening the dev tier would expose every branch build and preview image — and
+    its `latest` points at the newest merge, not at anything released.
 
 The end-to-end flow (merge → CI `sha-*` → `crane tag vX.Y.Z` → gitops bump →
 ArgoCD) is documented in
