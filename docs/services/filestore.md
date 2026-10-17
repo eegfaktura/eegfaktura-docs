@@ -68,9 +68,9 @@ Schema `filestore`, five tables:
 
 | Table | Holds |
 |-------|-------|
-| `file_categories` | file category definitions |
-| `storages` | storage roots |
-| `file_containers` | containers grouping files |
+| `file_categories` | file category definitions; fixed list `contract`, `invoice` (since 1.0.6 any other category is rejected) |
+| `storages` | storage roots; one per community, created on its first upload |
+| `file_containers` | containers grouping files; one per community and category, created on first use |
 | `files` | per-file metadata |
 | `file_attributes` | extra per-file attributes |
 
@@ -88,7 +88,6 @@ Migrations are run by Alembic (`alembic upgrade head`) on startup, before `pytho
 | `HTTP_FILE_DL_ENDPOINT` | download endpoint path segment |
 | `FILESTORE_LOCAL_BASE_DIR` | PVC mount where blobs are stored (config.py default `/vfeeg-filestore-data`; the Dockerfile sets `/eegfaktura-filestore-data` — note the inconsistency) |
 | `FILESTORE_TEMP_DIR` | temp directory for in-progress uploads |
-| `FILESTORE_CREATE_UNKNOWN_CATEGORY`, `FILESTORE_CREATE_UNKNOWN_CONTAINER`, `FILESTORE_CREATE_UNKNOWN_STORAGE` | auto-create flags |
 | `JWT_KEY_FILE` | path to the PyJWT-compatible RS256 public key PEM (maps to the internal `JWT_PUBLIC_KEY_FILE` setting — note the name mismatch) |
 | `JWT_AUDIENCE` | expected `aud` claim (default `account`) |
 | `GRAPHIQL_ENABLED` | enable the GraphiQL UI |
