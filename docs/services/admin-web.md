@@ -80,7 +80,6 @@ EegService:
   GET  /vfeeg/eeg                       → list EEGs
   GET  /vfeeg/participants?tenant=<id>  → members of an EEG
   GET  /vfeeg/operators                 → grid operators (for wizard select)
-  GET  /eeg/users                       → users
   POST /eeg/register                    → create EEG
   POST /eeg/ponton                      → set PONTON config
 
