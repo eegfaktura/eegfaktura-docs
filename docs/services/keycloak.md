@@ -71,7 +71,8 @@ The Keycloak-v1 hostname/proxy options (`KC_PROXY`, `PROXY_ADDRESS_FORWARDING`, 
 |---|---|
 | `KC_PROXY=edge`, `PROXY_ADDRESS_FORWARDING=true` | `KC_PROXY_HEADERS=xforwarded` + `KC_HTTP_ENABLED=true` |
 | `KC_HOSTNAME_PATH=/auth`, `KC_HOSTNAME_URL` | path as part of the `KC_HOSTNAME` URL; eegfaktura serves Keycloak without `/auth` |
-| `KC_HOSTNAME_STRICT_HTTPS`, `KC_HOSTNAME_STRICT_BACKCHANNEL` | `KC_HOSTNAME_STRICT`, `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` |
+| `KC_HOSTNAME_STRICT_HTTPS` | no direct replacement: the scheme is part of the `KC_HOSTNAME` URL |
+| `KC_HOSTNAME_STRICT_BACKCHANNEL=true` | `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=false` (default; inverse meaning) |
 
 The `eegfaktura-keycloak` image no longer sets any of the v1 options (since [eegfaktura-keycloak#21](https://github.com/eegfaktura/eegfaktura-keycloak/pull/21)) and deliberately does not set `KC_PROXY_HEADERS` (that would make directly reachable instances trust forwarded headers); deployments behind a proxy set it themselves.
 
