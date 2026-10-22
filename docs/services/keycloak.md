@@ -11,7 +11,7 @@ OIDC identity provider for the entire platform. One realm, four clients, four gr
 | Token signing | RS256 |
 | State | PostgreSQL database `keycloak` |
 
-In the local docker-compose stack Keycloak runs the custom `ghcr.io/eegfaktura/eegfaktura-keycloak:latest` image, started with `start --optimized --import-realm`. The realm (`EEGFaktura`) is imported from `./keycloak/import`. It publishes the main port `8080` and the management port `9181` (`KC_HTTP_MANAGEMENT_PORT`), and runs with `KC_PROXY=edge` and `KC_HOSTNAME_STRICT=false` for local use.
+In the local docker-compose stack Keycloak runs the custom `ghcr.io/eegfaktura/eegfaktura-keycloak:latest` image, started with `start --optimized --import-realm`. The realm (`EEGFaktura`) is imported from `./keycloak/import`. It publishes the main port `8080` and the management port `9181` (`KC_HTTP_MANAGEMENT_PORT`), and runs with `KC_HOSTNAME_STRICT=false` for local use. Keycloak is reached directly there, so no proxy headers are trusted. The compose file still sets the Keycloak-v1 options `KC_PROXY=edge`, `PROXY_ADDRESS_FORWARDING` and `KC_HOSTNAME_STRICT_BACKCHANNEL`; Keycloak 26 ignores them and only logs "Hostname v1 options … still in use".
 
 For the auth contract (clients, mappers, JWT claims, role behavior), see [Architecture / Authentication](../architecture/auth.md). This page covers the Keycloak realm content.
 
@@ -60,10 +60,21 @@ When Keycloak runs behind an ingress, the realm setting `frontendUrl` must match
 | Variable | Purpose |
 |----------|---------|
 | `KC_DB_*` | database connection |
-| `KC_HOSTNAME` | public hostname |
-| `KC_HTTP_ENABLED` | `true` when behind a TLS-terminating ingress |
-| `KC_PROXY` | `edge` when behind an ingress |
+| `KC_HOSTNAME` | public URL incl. scheme, e.g. `https://<auth-domain>` (no `/auth` path) |
+| `KC_HTTP_ENABLED` | `true` when TLS terminates at the ingress / reverse proxy |
+| `KC_PROXY_HEADERS` | `xforwarded` when behind an ingress / reverse proxy that sets `X-Forwarded-*`; leave unset when Keycloak is reached directly |
 | JVM heap | tune; defaults are large |
+
+The Keycloak-v1 hostname/proxy options (`KC_PROXY`, `PROXY_ADDRESS_FORWARDING`, `KC_HOSTNAME_PATH`, `KC_HOSTNAME_URL`, `KC_HOSTNAME_STRICT_HTTPS`, `KC_HOSTNAME_STRICT_BACKCHANNEL`) have no effect on Keycloak 26 and only trigger the "Hostname v1 options … still in use" warning. Replacements:
+
+| v1 (no effect) | Keycloak 26 |
+|---|---|
+| `KC_PROXY=edge`, `PROXY_ADDRESS_FORWARDING=true` | `KC_PROXY_HEADERS=xforwarded` + `KC_HTTP_ENABLED=true` |
+| `KC_HOSTNAME_PATH=/auth`, `KC_HOSTNAME_URL` | path as part of the `KC_HOSTNAME` URL; eegfaktura serves Keycloak without `/auth` |
+| `KC_HOSTNAME_STRICT_HTTPS` | no direct replacement: the scheme is part of the `KC_HOSTNAME` URL |
+| `KC_HOSTNAME_STRICT_BACKCHANNEL=true` | `KC_HOSTNAME_BACKCHANNEL_DYNAMIC=false` (default; inverse meaning) |
+
+The `eegfaktura-keycloak` image no longer sets any of the v1 options (since [eegfaktura-keycloak#21](https://github.com/eegfaktura/eegfaktura-keycloak/pull/21)) and deliberately does not set `KC_PROXY_HEADERS` (that would make directly reachable instances trust forwarded headers); deployments behind a proxy set it themselves.
 
 ## Build and image
 
