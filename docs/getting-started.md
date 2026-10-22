@@ -58,6 +58,13 @@ follow its README. In short:
     [service page](services/backend.md) and the platform
     [build pipeline](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/build-pipeline.md).
 
+!!! tip "Testing unreleased changes across several services"
+    The Compose stack runs *released* images. To try branches of several services
+    together before a release, VFEEG team members use a private workspace that
+    builds every service from source with fixture data and a smoke test (ask the
+    team for access). For a single service, a
+    [Preview Deployment](#4-zones-dev-pilot-prod) into the Dev zone is usually enough.
+
 ## 3. Work on a single service
 
 Each service lives in its own repo with its own stack and test runner. Pick the
@@ -71,8 +78,16 @@ one you are changing and match its existing patterns.
 | `eegfaktura-billing` | Java (Spring Boot) | `./mvnw test` |
 | `eegfaktura-eda-xp` | Scala (Pekko) | `sbt test` |
 | `eegfaktura-admin-backend` | Scala (Pekko) | `sbt test` |
-| `eegfaktura-web` | React 18 + Ionic 7 + Vite | `npm run test.unit` (Vitest), e2e `npm run test.e2e` |
-| `eegfaktura-admin` | React (CRA) | `npm test` |
+| `eegfaktura-web` | React 18 + Ionic 7 + Vite | `pnpm run test.unit` (Vitest) — **pnpm only** (version in `packageManager`), never `npm install` |
+| `eegfaktura-admin` | React (CRA) | `CI=true npm test` |
+
+The table is the short version. The authoritative commands are in each repo's
+`.github/workflows/pr-checks.yml`, which runs on every pull request (unit and
+full test suite, type check or lint where the stack has one) next to a security
+scan of dependencies, secrets and misconfigurations. Some services need a
+code-generation step before their tests build (e.g. `protoc` / `go generate`
+for the backend); the workflow shows how. Database tests use Testcontainers,
+so Docker must be running.
 
 Each service page under [Services](services/index.md) documents its
 responsibilities, APIs, configuration and secrets. The frontend talks **only**
@@ -83,33 +98,47 @@ to backend services — never directly to a database (see
 
 - Read [`CONTRIBUTING.md`](https://github.com/eegfaktura/eegfaktura-docs/blob/main/CONTRIBUTING.md)
   in each repo.
-- Branch from the repo's **default branch** (for `eegfaktura-backend` that is
-  `master`, not the stale `main`).
+- Branch from the repo's **default branch** (`master` or `main`, depending on
+  the repo — check before you branch).
 - **Every change carries a CHANGELOG entry** in the same PR (`[Unreleased]`
   section); the release stamps it to a version.
 - Conventional-commit style (`feat(scope): …`, `fix: …`, `docs: …`).
 
-## 4. Zones: Dev / Prod
+## 4. Zones: Dev / Pilot / Prod
 
-Two quality zones are in operation. **Dev** is a public-cloud cluster with
-direct developer access; **Prod** is on-prem and operator-gated.
+Three zones are in operation. **Dev** is a public-cloud cluster with direct
+developer access; **Pilot** and **Prod** are on-prem and operator-gated.
 
 | Zone | Where | Access | Data |
 |---|---|---|---|
 | **Dev** | STACKIT SKE (`eu02`) | direct (kubeconfig) | synthetic / anonymized |
+| **Pilot** | on-prem, same cluster as Prod, own namespace and database | operator only | real data of the communities that volunteered as pilots |
 | **Prod** | on-prem, ArgoCD/GitOps | operator only | production data |
+
+Pilot is where a feature runs for a few real communities before it goes to
+everyone; while no feature is being piloted it runs the same images as Prod
+([`pilot-zone.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/pilot-zone.md)).
+Both on-prem zones are synced by an operator in ArgoCD — never automatically.
 
 Full model:
 [`zonen-konzept.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/zonen-konzept.md).
-Dev-zone URLs, test users and the daily hibernation window (the cluster sleeps
-**22:00–08:00 Vienna**) are in
+Dev-zone URLs and test users are in
 [`access.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/access.md).
+Dev runs **on demand**: a deploy (or the workflow „Dev-Cluster starten/schlafen“)
+wakes it, and it goes back to sleep at 22:00 Vienna
+([`dev-on-demand.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/dev-on-demand.md)).
 
 !!! tip "See your branch running in Dev — Preview Deployments"
-    Pushing a branch named `preview/**` builds and deploys it on-demand into the
-    Dev zone (auto-reset when the branch is deleted). This is how you validate a
-    change against a real cluster without touching anyone else's environment.
-    See [ADR-0007](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/adr/0007-preview-deployments-unmerged-branches.md).
+    Pushing a branch named `preview/**` builds that service and deploys it into
+    the Dev zone; deleting the branch resets the service to `latest` (delete it
+    only after the merge commit's build on the default branch has finished).
+    Dev has **one slot per service** — the last push wins, and anyone else
+    testing that service in Dev sees your build — so tell the team. Migrations
+    must be additive, because Dev has one shared database. See
+    [ADR-0007](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/adr/0007-preview-deployments-unmerged-branches.md).
+    For a longer-lived, fully isolated stack with its own database, Dev also
+    hosts **feature environments** (`env-<name>`, branch `env/<name>`, see
+    [ADR-0008](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/adr/0008-ephemeral-feature-environments.md)).
 
 ## 5. Logs & debugging
 
@@ -118,7 +147,7 @@ Dev-zone URLs, test users and the daily hibernation window (the cluster sleeps
 - **Dev zone:** read-only `kubectl` access via a shared `log-reader` kubeconfig
   (logs, pods, events — no writes, no secrets). Setup and usage in
   [`access.md` → *Read-only Log-Zugriff*](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/access.md).
-  Remember the 22:00–08:00 hibernation — no logs while the cluster sleeps.
+  Dev runs on demand — while the cluster sleeps there are no logs; wake it first.
 - **Prod:** read-only via Dynatrace (Grail), maintainer/team-scoped — see
   [`prod-log-review.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/prod-log-review.md).
   Do not reconfigure prod logging.
@@ -132,11 +161,15 @@ most common source of confusion:
 - **Dev tier (rolling):** each source repo's CI builds `ghcr.io/vfeeg-development/<image>`
   with rolling tags (`sha-<commit>`, `latest`). The Dev zone runs `latest` and
   auto-rolls on every push to the default branch.
-- **Release (pinned):** a release is a **manual, by-digest** promotion — the
-  exact `sha-*` image is re-tagged `vX.Y.Z` (`crane tag …`). Nothing is rebuilt;
-  the released tag points at the identical digest that was tested.
-- **Prod (pinned):** the GitOps repo pins `vX.Y.Z` tags; ArgoCD syncs them. Prod
-  never runs `latest`.
+- **Release (pinned):** a release is a **by-digest** promotion, started by hand
+  with the `promote-image.yml` workflow in
+  [`eegfaktura-gitops`](https://github.com/vfeeg-development/eegfaktura-gitops)
+  (service, digest of the `sha-*` build, version, zone). It tags the exact image
+  `vX.Y.Z` and prepares the branches for the gitops and Compose pull requests.
+  Nothing is rebuilt; the released tag points at the identical digest that was
+  tested.
+- **Prod and Pilot (pinned):** the GitOps repo pins `vX.Y.Z` tags; an operator
+  syncs them in ArgoCD (manual sync, never automatic). Neither zone runs `latest`.
 - **Public release tier:** the dev tier is **private**, so promoting to prod also
   copies the released digest to `ghcr.io/eegfaktura/<image>` (`vX.Y.Z` and
   `latest`). That is the tier the Compose stack pulls from, and the only one
@@ -149,8 +182,8 @@ most common source of confusion:
     opening the dev tier would expose every branch build and preview image — and
     its `latest` points at the newest merge, not at anything released.
 
-The end-to-end flow (merge → CI `sha-*` → `crane tag vX.Y.Z` → gitops bump →
-ArgoCD) is documented in
+The end-to-end flow (merge with CHANGELOG stamp → CI `sha-*` → `promote-image.yml`
+→ gitops and Compose pull requests → operator sync in ArgoCD) is documented in
 [`build-pipeline.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/build-pipeline.md).
 
 ## 7. Repo & documentation map
