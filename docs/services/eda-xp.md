@@ -117,7 +117,7 @@ When the backend triggers an EDA flow (Zählpunkt activation, energy-data reques
 
 The backend's default labels are in its `config.yaml` (`eda-process-versions`).
 
-`EC_PRTFACT_CHANGE` is only accepted by the grid operator during business hours (Mon–Fri 09:00–17:00) and the change takes effect the following day. The XML builder sets `ProcessDate = today + 1` and `DateFrom = today + 1` (Europe/Vienna); `DateActivate` is the metering point's activation date. Triggering outside that window returns an `ABLEHNUNG_CPF` with response code 82 (`Prozessdatum falsch`).
+`EC_PRTFACT_CHANGE` is only accepted by the grid operator between 09:00 and 17:00 Austrian time and the change takes effect the following day. The XML builder sets `ProcessDate = today + 1` and `DateFrom = today + 1` (Europe/Vienna); `DateActivate` is the metering point's activation date. Triggering outside that window returns an `ABLEHNUNG_CPF` with response code 82 (`Prozessdatum falsch`).
 
 ## XXE hardening
 
@@ -244,7 +244,7 @@ Two volumes are declared: `/conf` (holds `application.conf`) and `/storage/prod`
 
 ## When PONTON is not deployed
 
-In environments without a real PONTON link (dev / mock instances), an [eda-mock](eda-mock.md) placeholder stands in for the PONTON side and the customer SPA's "Messages" menu is hidden. Note the currently deployed `eda-mock` is a `traefik/whoami` placeholder rather than a functional EDA stub — see that page for details.
+In environments without a real PONTON link (dev / mock instances), an [eda-mock](eda-mock.md) placeholder stands in for the PONTON side: a `traefik/whoami` HTTP echo rather than a functional EDA stub — see that page for details.
 
 ## Related
 

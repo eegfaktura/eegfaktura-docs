@@ -60,7 +60,7 @@ Once final, the run cannot be re-run (`POST /api/billing` answers `409`). To "fi
 
 Each `billing_run` has a `mail_status` field. It is a one-shot flag: `sendmail` sets it to `IN PROGRESS`, then `SENT`, and refuses to run while it is non-empty (the UI also hides the re-send button). The per-recipient result is stored as text in `send_mail_protocol` (`OK`, `FEHLER`, or a warning for rejected address parts on an otherwise delivered mail).
 
-To re-send, update `mail_status` to `NULL` in the database. The next mail action then targets **all** documents of the run again (no per-recipient re-send). This is sometimes used in incident response; document the rationale before applying it.
+A run is therefore mailed once; there is no per-recipient re-send.
 
 Mail path and address handling: see [Architecture / Notification e-mail](../architecture/email.md).
 
@@ -124,7 +124,7 @@ Owns schema `billingj`. Key tables:
 
 Master data is read through the backend's view `base.billing_masterdata` (mapped read-only via `@Subselect`), filtered by `tenant_id` — a cross-schema SQL dependency on the backend.
 
-Migrations are Flyway (`src/main/resources/db/migration`, `V1_0` … `V1_15`). If the schema is initialized from a full-DB `pg_dump` (e.g. a dump-restore deployment), the dump will contain `billingj.*` tables and Flyway will fail to re-create them. Workaround: `DROP SCHEMA billingj CASCADE` before the billing pod starts the first time. See [Architecture / Databases](../architecture/databases.md) for context.
+Migrations are Flyway (`src/main/resources/db/migration`, `V1_0` … `V1_15`). There is no baseline-on-migrate: pre-existing `billingj` tables without Flyway history make the start fail (see [Architecture / Databases](../architecture/databases.md)).
 
 ## Document templates
 
@@ -155,11 +155,8 @@ These are the variables the application actually reads (`application.properties`
 | `MAIL_SMTP_AUTH`, `MAIL_SMTP_STARTTLS_ENABLE` | SMTP auth / STARTTLS toggles (defaults `true` / `false`) |
 | `MAIL_NO_REPLY_TO` | sender address, also used for the Message-ID domain (default `no-reply@eegfaktura.at`) |
 | `HOST_PORT` | HTTP listen port (default `8080`) |
-| JVM heap (`-Xmx`) | tune per environment; defaults are JVM-default which is large |
 
 There is **no** `SPRING_DATASOURCE_*` or `KEYCLOAK_*` configuration — the datasource is driven by the `JDBC_DATABASE_*` variables and token validation uses the local PEM file (`JWT_PUBLICKEYFILE`), not a Keycloak issuer URL.
-
-In smaller / dev deployments, set `-Xmx512m` or so to keep idle memory reasonable.
 
 ## Build and image
 
@@ -174,7 +171,7 @@ In smaller / dev deployments, set `-Xmx512m` or so to keep idle memory reasonabl
 ## Related
 
 - [Architecture / Authentication](../architecture/auth.md) — `hasRole` + cert mount
-- [Architecture / Databases](../architecture/databases.md) — Flyway + pg_dump conflict
+- [Architecture / Databases](../architecture/databases.md) — Flyway, schema layout
 - [Architecture / Notification e-mail](../architecture/email.md) — billing's own SMTP path
 - [services/energystore](energystore.md) — energy-data source (via the web)
 - [reference/obis-codes](../reference/obis-codes.md) — billing-relevant energy values

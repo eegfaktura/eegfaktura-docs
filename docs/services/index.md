@@ -23,7 +23,7 @@ Each service page covers:
 - **[energystore-v2](energystore-v2.md)** (Go + TimescaleDB) — planned successor, not rolled out yet
 - **[filestore](filestore.md)** (Python) — file storage and download endpoints
 - **[eda-xp](eda-xp.md)** (Scala/Pekko) — EDA protocol gateway for network operator communication
-- **[eda-mock](eda-mock.md)** (Scala) — EDA mock for development / testing
+- **[eda-mock](eda-mock.md)** (Dev zone only, `traefik/whoami` echo) — HTTP sink for eda-xp's outbound calls; no code, no MQTT
 - **[admin-backend](admin-backend.md)** (Scala/Pekko) — VFEEG superuser API for cross-instance maintenance
 
 ### Frontend layer (SPAs)

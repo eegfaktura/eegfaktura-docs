@@ -13,11 +13,10 @@ PostgreSQL cluster. Hosts the main application database (multiple schemas), the 
 |---|---|
 | Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0` |
 | Topology | single instance in the local stack; the production Postgres is a separate image of the organisation and not part of the application manifests |
-| Storage | PVC (RWO) |
 | Schemas | `base`, `eda`, `billingj`, `filestore` (in the main DB) |
 
 !!! note "The local stack uses a custom Postgres image"
-    The local docker-compose stack runs `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0`, **not** an upstream `postgres:*` image. This custom image performs its own initialization internally: on first start it creates the `eegfaktura` application database and the `keycloak` database (via `DB_*` / `KEYCLOAK_DB_*` env vars) and initializes the data directory with locale `de_DE:UTF8` (`POSTGRES_INITDB_ARGS`). Locally it is published on host port `26432` (→ container `5432`). Production may use a different image and topology (see CloudNativePG below).
+    The local docker-compose stack runs `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0`, **not** an upstream `postgres:*` image. This custom image performs its own initialization internally: on first start it creates the `eegfaktura` application database and the `keycloak` database (via `DB_*` / `KEYCLOAK_DB_*` env vars) and initializes the data directory with locale `de_DE:UTF8` (`POSTGRES_INITDB_ARGS`). Locally it is published on host port `26432` (→ container `5432`).
 
 For the per-service schema layout, see [Architecture / Databases](../architecture/databases.md).
 
@@ -38,7 +37,7 @@ For the per-service schema layout, see [Architecture / Databases](../architectur
 | `billingj` | billing | Flyway via Spring Boot (`spring.flyway.default-schema=billingj`) |
 | `filestore` | filestore | Alembic (`alembic upgrade head` in `entrypoint.sh`) |
 
-A `pg_dump --schema-only` restore conflicts with billing's Flyway. See the "schema-dump vs Flyway" section in [Architecture / Databases](../architecture/databases.md) for the `DROP SCHEMA billingj CASCADE` workaround.
+billing's Flyway does not adopt pre-existing `billingj` tables (no baseline-on-migrate); see [Architecture / Databases](../architecture/databases.md).
 
 ## Extensions
 
@@ -60,11 +59,10 @@ Because all services use the same user, schema separation is a convention of the
 A separate Postgres deployment hosts the TimescaleDB-backed time-series data for [energystore-v2](energystore-v2.md). Architectural choices:
 
 - **Hash-partitioned hypertable** on `tenant_id` for multi-tenant write isolation.
-- **Compression policy** on chunks past a configurable age.
-- **Continuous aggregates** for the hourly / daily / monthly rollups that settlement queries consume.
-- **pgBouncer** in front in production deployments.
+- **Compression policy** on chunks older than 30 days.
+- **Continuous aggregates** `energy_hourly` / `energy_daily`.
 
-energystore-v2 is not rolled out yet; the design targets **CloudNativePG (CNPG)** with primary + async read-replica. CNPG is not deployed yet.
+energystore-v2 is not rolled out yet.
 
 ## Related
 

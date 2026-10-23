@@ -7,9 +7,8 @@ Eclipse Mosquitto MQTT broker. The platform's message bus, used for EDA inbound 
 | | |
 |---|---|
 | Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` |
-| Topology | single-instance StatefulSet |
 | Port | 1883 (plain), no TLS by default; internal only in the local stack (not published to the host) |
-| Persistence | `persistence true`, data under `/mosquitto/data/` (PVC-backed) |
+| Persistence | `persistence true`, data under `/mosquitto/data/` |
 
 The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` (with `mosquitto.conf` baked in, started with `mosquitto -c /mosquitto/config/mosquitto.conf`), rather than an upstream `eclipse-mosquitto` image. Port `1883` is reachable only inside the compose network; it is not published to the host. The dev-zone manifest in `eegfaktura-platform` runs the upstream `eclipse-mosquitto:2.0.22` image with the config from a ConfigMap.
 
@@ -20,7 +19,7 @@ The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktu
 
 | Topic (prod) | Publisher | Subscriber | Payload |
 |---|---|---|---|
-| `eda/response/<tenant>/protocol/<process_lower>` | eda-xp / eda-mock | backend (`eda/response/+/protocol/#`) | EDA message as JSON (circe) |
+| `eda/response/<tenant>/protocol/<process_lower>` | eda-xp | backend (`eda/response/+/protocol/#`) | EDA message as JSON (circe) |
 | `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore (`eda/response/+/protocol/cr_msg`); the backend receives it via its wildcard but skips it | gzip + Base64 around the `MqttEnergyMessage` JSON, not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
 | `eda/response/<tenant>/protocol/cr_msg_history` | energystore (after each import) | backend (process history) | plain JSON: meter, conversation id, message code, periods |
 | `eda/response/<tenant>/command/<command>` | eda-xp | backend (`eda/response/+/command/#`) | JSON |
@@ -53,7 +52,7 @@ The main `mosquitto.conf` (dev-zone manifest in `eegfaktura-platform`; the local
 | `listener` | `1883` | bind port |
 | `allow_anonymous` | `true` | no client authentication |
 | `persistence` | `true` | enable on-disk persistence |
-| `persistence_location` | `/mosquitto/data/` | PVC mount |
+| `persistence_location` | `/mosquitto/data/` | data directory |
 | `log_dest` / `log_type` | `stdout` / `error`, `warning`, `notice` | logging |
 
 ## Delivery semantics

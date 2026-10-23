@@ -8,10 +8,10 @@ Mosquitto MQTT is the message bus between the EDA gateway (`eda-xp`), the energy
 |------|-------|
 | Service | `mosquitto` (Eclipse Mosquitto) |
 | Default port | 1883 (in-cluster), no TLS by default |
-| Persistence | PVC-backed, on by default |
-| Auth | username/password by default; TLS / mTLS optional |
+| Persistence | `persistence true` (QoS-1 queues of persistent sessions survive a broker restart) |
+| Auth | none: `allow_anonymous true`, no client credentials, no topic ACLs (broker reachable only inside the cluster / compose network) |
 
-See [services/mosquitto](../services/mosquitto.md) for sizing and operational notes.
+See [services/mosquitto](../services/mosquitto.md) for configuration and delivery semantics.
 
 ## Topic catalogue
 
@@ -78,7 +78,7 @@ The backend registers callbacks for these protocols (`eda/edaSubscription.go`, `
 |---------|-----------|---------|
 | `EC_REQ_ONL` | bidirectional | "Anmeldung Teilnahme Online" — Zählpunkt activation (`ANFORDERUNG_ECON` → `ANTWORT_ECON`, `ZUSTIMMUNG_ECON`, `ABSCHLUSS_ECON`, …) |
 | `EC_REQ_OFF` | bidirectional | Offline registration (`ANFORDERUNG_ECOF` → `…_ECOF`) |
-| `EC_PRTFACT_CHANGE` | bidirectional | Participation-factor change. Outbound `ANFORDERUNG_CPF`, inbound `ANTWORT_CPF` (accepted) or `ABLEHNUNG_CPF` (rejected). Grid operator only accepts requests Mon-Fri 09:00–17:00, effective the next day. |
+| `EC_PRTFACT_CHANGE` | bidirectional | Participation-factor change. Outbound `ANFORDERUNG_CPF`, inbound `ANTWORT_CPF` (accepted) or `ABLEHNUNG_CPF` (rejected). Grid operator only accepts requests between 09:00 and 17:00 Austrian time, effective the next day. |
 | `EC_PODLIST` | bidirectional | Metering-point list: outbound `ANFORDERUNG_ECP`, inbound `SENDEN_ECP` / `ABLEHNUNG_ECP` |
 | `CR_REQ_PT` | bidirectional | Energy-data request: outbound `ANFORDERUNG_PT`, inbound `ANTWORT_PT` / `ABLEHNUNG_PT` |
 | `CM_REV_SP` | bidirectional | Revocation by the service provider (`AUFHEBUNG_CCMS` → `ANTWORT_CCMS` / `ABLEHNUNG_CCMS`) |
@@ -169,7 +169,7 @@ For non-shared subscriptions either MQTT 3.1.1 or MQTT 5 works. For **Shared Sub
 ## Related
 
 - [services/eda-xp](../services/eda-xp.md) — gateway implementation
-- [services/eda-mock](../services/eda-mock.md) — local stub
+- [services/eda-mock](../services/eda-mock.md) — Dev-zone HTTP echo (no MQTT)
 - [services/mosquitto](../services/mosquitto.md) — broker config
 - [services/energystore](../services/energystore.md) — energy-data consumer
 - [reference/obis-codes](../reference/obis-codes.md) — OBIS code semantics

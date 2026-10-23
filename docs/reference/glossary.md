@@ -46,13 +46,13 @@ Domain terms used throughout the documentation.
 
 `VZP` and `EZP` tariffs can be simple or time-based, see **ZVT**.
 
-**Teilnahmefaktor** (participation factor) — Percentage (0..100) per metering point per EEG. Determines the share of the metering point's consumption / production attributed to this EEG. A metering point can be in up to 5 EEGs; the sum of participation factors must not exceed 100. Default 100% for metering points activated before 2024-04-08. Changes (EDA process `EC_PRTFACT_CHANGE`) are only accepted by the grid operator Mon-Fri 09:00–17:00 Austrian time and take effect the next day; outside the window the grid operator rejects with code 82 „Prozessdatum falsch“. Since web 1.8.0 the form shows the window and warns before sending outside it (`src/util/PartFactWindow.util.ts`, hour check only; sending stays possible).
+**Teilnahmefaktor** (participation factor) — Percentage (0..100) per metering point per EEG. Determines the share of the metering point's consumption / production attributed to this EEG. A metering point can be in up to 5 EEGs; the sum of participation factors must not exceed 100. Default 100% for metering points activated before 2024-04-08. Changes (EDA process `EC_PRTFACT_CHANGE`) are only accepted by the grid operator between 09:00 and 17:00 Austrian time and take effect the next day; outside the window the grid operator rejects with code 82 „Prozessdatum falsch“. Since web 1.8.0 the form shows the window and warns before sending outside it (`src/util/PartFactWindow.util.ts`, hour check only; sending stays possible).
 
 **Tenant** — In eegfaktura the tenant is the EEG. The string is the primary key `base.eeg.tenant` and appears on the user's Keycloak attribute `tenant` (JWT claim `tenant`, a string array, compared case-insensitively). Usually it equals the `rcNumber`; GEA tenants carry a suffix (`GCxxxxxx-00n`) and then differ from it.
 
 **Verteilungsmodell** — see Allocation model.
 
-**Zählpunkt (ZP)** — Metering point. Direction is `CONSUMPTION` or `GENERATION`. Identified by a 33-character AT-prefixed string assigned by the network operator. Status in the online registration flow: `NEW` → `PENDING` → `APPROVED` → `ACTIVE`; further states include `INACTIVE`, `REJECTED`, `REVOKED`, `INVALID`, `ARCHIVED` (`model/participant.go`).
+**Zählpunkt (ZP)** — Metering point. Direction is `CONSUMPTION` or `GENERATION`. Identified by a 33-character AT-prefixed string assigned by the network operator. Status in the online registration flow: `NEW` → `PENDING` → `APPROVED` → `ACTIVE`; further states include `INACTIVE` (also the result of a revocation), `REJECTED`, `INVALID`, `ARCHIVED` (`model/participant.go`). `REVOKED` exists as a constant but is not set by the revocation flow.
 
 **ZVT** — Zeitvariabler Tarif (time-of-use tariff), since web 1.8.0. A `VZP`/`EZP` tariff in mode "Zeitbasiert" has a base price plus up to two named time windows (15-minute raster, may cross midnight) with their own price. For billing, energystore returns per-window sums (`buckets`) per metering point, and the SPA forwards them with the window definitions to billing.
 
@@ -94,7 +94,7 @@ Domain terms used throughout the documentation.
 
 **eda-xp** — Scala/Pekko EDA gateway. Speaks HTTP with PONTON, MQTT with the rest of the platform. Sometimes named `eda-xp-connector` or `xp-adapter` in legacy configs.
 
-**eda-mock** — Scala stub of the EDA gateway for dev/test environments without a real PONTON link.
+**eda-mock** — Dev-zone placeholder for the PONTON/KEP side: two `traefik/whoami` HTTP echo containers that answer eda-xp's outbound calls with 200; no code of its own, no MQTT, no grid-operator responses.
 
 **energystore** — Go + Badger service. Stores per-period energy time-series and answers report queries.
 
@@ -108,7 +108,6 @@ Domain terms used throughout the documentation.
 
 **Mosquitto** — Eclipse Mosquitto MQTT broker. The message bus for EDA inbound and energy-data ingestion.
 
-**PVC** — PersistentVolumeClaim. Stateful storage for PostgreSQL, energystore (Badger), filestore (blobs), Mosquitto (queue persistence).
 
 ## Related
 

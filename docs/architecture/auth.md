@@ -108,7 +108,7 @@ Alongside the RS256 bearer path above, two Go services expose a second middlewar
 Notes:
 
 - The Basic credentials are an ordinary Keycloak username/password; the service exchanges them for a token internally. backend additionally requires `/EEG_ADMIN` in `access_groups`; energystore checks only the tenant. Neither applies the `superuser` exemption on this path.
-- The exchange uses `at.ourproject.vfeeg.api`, the realm client with Direct Access Grants enabled. The public SPA clients (`…app`, `…admin`) do not allow that grant.
+- The exchange uses `at.ourproject.vfeeg.api`, the realm client with Direct Access Grants enabled. The customer SPA client `…app` has it switched off (`directAccessGrantsEnabled: false`); for the admin client `…admin` the realm file does not set it, so it depends on the Keycloak default for imported clients.
 - energystore decodes the Basic value with URL-safe base64 (`base64.URLEncoding`), backend with standard base64.
 - Routes guarded by `Protect` (bearer-only) do **not** accept Basic. In particular the participant endpoints — `POST /participant`, `PUT /participant/{id}`, `POST /participant/{id}/confirm`, `PUT /participant/v2/{id}`, `DELETE /participant/v2/{id}` (`api/participantController.go`) — require a bearer JWT with `EEG_ADMIN`; a Basic request returns HTTP 403. There is currently no `ProtectApi` equivalent for participant writes.
 
@@ -120,8 +120,8 @@ If no row matches, the member sees an empty UI. Provisioning a new `EEG_USER` th
 
 ## Tenant scoping
 
-- The customer SPA picks the active tenant from the JWT's `tenant` array (last choice kept in `localStorage`); the dropdown lists the communities returned by backend `GET /user/get-user` (all communities for a `superuser`).
-- API calls carry the tenant in a header: `tenant` (backend, energystore; `X-Tenant` is accepted as fallback) or `Tenant` (billing). energystore URLs additionally contain the community id (`/eeg/v2/<ecId>/...`), which is not the value checked against the token.
+- The customer SPA picks the active tenant from the JWT's `tenant` array (last choice kept in `localStorage`); the dropdown lists the communities returned by backend `GET /eeg/user/get-user` (behind `Protect`, i.e. `EEG_ADMIN` only; all communities for a `superuser`).
+- API calls carry the tenant in a header: `tenant` (backend; `X-Tenant` is accepted as fallback) or `Tenant` (billing). To energystore the SPA's REST calls send **`X-Tenant` = the EEG's `rcNumber`** (`energy.service.ts`, `getSecureHeadersX(token, tenant.rcNr)`), not `base.eeg.tenant`; energystore URLs additionally contain the community id (`/eeg/v2/<ecId>/...`), which is not the value checked against the token. Where tenant and rcNumber differ (GEA), see the [trap in services/web](../services/web.md#tenant-vs-ecid).
 - Every backend rejects requests whose tenant header is not in the JWT's `tenant` array (HTTP 401 or 403 depending on service and route), except for tokens with realm role `superuser`.
 
 The tenant value is `base.eeg.tenant` (the primary key of `base.eeg`, usually the RC number), not the EDA community id (`base.eeg."communityId"`). GEA sub-communities have tenants of the form `GCxxxxxx-00n`; filestore stores their documents under the stem (`GCxxxxxx`) and compares the stem.

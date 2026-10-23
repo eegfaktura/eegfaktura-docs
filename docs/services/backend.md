@@ -66,7 +66,7 @@ When a community has moved to another zone, eda-xp forwards its inbound Ponton m
 | Protocol | Handler | Effect |
 |----------|---------|--------|
 | `CR_MSG_HISTORY` (Go constant `model.CR_MSG`) | `protocolCrMsgHandler` | published by the energystore on `eda/response/<tenant>/protocol/cr_msg_history` after it imported a `CR_MSG`; writes one process-history entry (meter, from, to) per energy block. The raw `CR_MSG` itself is dropped in the backend's MQTT route — the energystore consumes it directly |
-| `CR_REQ_PT` | `protocolCrReqPtHandler` | participant-list response; only writes history / notifications, does **not** change metering-point status |
+| `CR_REQ_PT` | `protocolCrReqPtHandler` | energy-data request (`ANFORDERUNG_PT`) answers `ANTWORT_PT` / `ABLEHNUNG_PT`; only writes history / notifications, does **not** change metering-point status |
 | `EC_REQ_ONL` | `protocolEcReqOnlHandler` | Zählpunkt online-activation lifecycle |
 | `EC_REQ_OFF` | `protocolEcReqOnlHandler` | offline registration lifecycle (same handler as `EC_REQ_ONL`) |
 | `CM_REV_IMP` | `protocolCmRevImpHandler` | revocation, import direction |
@@ -94,7 +94,7 @@ The grid operator validates inbound `ANFORDERUNG_*` payloads on receipt. Two rec
 
 For `EC_PRTFACT_CHANGE` specifically the grid operator only accepts requests between 09:00 and 17:00 Austrian time, and the change takes effect the next calendar day. The backend does **not** enforce this window: an `ANFORDERUNG_CPF` sent outside it receives an `ABLEHNUNG_CPF` with code 82 even when the payload is otherwise correct. The web form warns outside the window (eegfaktura-web 1.8.0) but still allows sending.
 
-When adding support for a new EDA protocol or message code, the subscription list **and** the message-code switch inside the handler both need updating — see [Architecture / Messaging](../architecture/messaging.md) for the six gap points.
+When adding support for a new EDA protocol or message code, the subscription list **and** the message-code switch inside the handler both need updating — see [Architecture / Messaging](../architecture/messaging.md) for the seven gap points.
 
 ## gRPC API
 
@@ -134,8 +134,6 @@ Configuration is loaded with spf13/viper from `config.yaml` in the `-configPath`
 | `KEYCLOAK_CONFIG` | path to the Keycloak client JSON (clients `app` and `api`; default `./keycloak.json`) |
 | `LOG_LEVEL` | logrus level, e.g. `info` / `debug` (default `debug`) |
 
-Consult the deployed `ConfigMap` for the authoritative list.
-
 ## Secrets
 
 | Secret | Holds |
@@ -164,6 +162,6 @@ The backend's auth-Z coverage is incomplete. All REST routes except `GET /eeg` a
 ## Related
 
 - [Architecture / Authentication](../architecture/auth.md)
-- [Architecture / Messaging](../architecture/messaging.md) — six gap points
+- [Architecture / Messaging](../architecture/messaging.md) — seven gap points
 - [Architecture / Databases](../architecture/databases.md) — `base` and `eda` schema layout
 - [services/eda-xp](eda-xp.md) — the MQTT producer side

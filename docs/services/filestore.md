@@ -129,5 +129,4 @@ The production-deployed filestore historically lagged the public-clone source by
 ## Related
 
 - [Architecture / Authentication](../architecture/auth.md) — PyJWT caveats
-- [services/billing](billing.md) — main producer of files
 - [services/web](web.md) — consumer

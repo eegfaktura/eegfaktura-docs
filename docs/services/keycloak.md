@@ -58,8 +58,6 @@ These apply to Keycloaks set up from this config; the running instances got the 
 
 Keycloak owns its own logical database (typically named `keycloak`) in the shared PostgreSQL cluster. Schema is managed entirely by Keycloak; do not migrate or modify directly.
 
-The largest table is `offline_user_session` in long-running instances.
-
 ## User-attribute cache quirk (Keycloak 25)
 
 Keycloak 25 caches `cannot map type for token claim` failures per user. If a `tenant` attribute is provisioned in a format the mapper cannot parse (e.g. unquoted instead of JSON-quoted), the user can be stuck with a permanent token-without-tenant state even after the attribute is fixed.
@@ -83,7 +81,6 @@ When Keycloak runs behind an ingress, the realm setting `frontendUrl` must match
 | `KC_HOSTNAME` | public URL incl. scheme, e.g. `https://<auth-domain>` (no `/auth` path) |
 | `KC_HTTP_ENABLED` | `true` when TLS terminates at the ingress / reverse proxy (the image sets `true`) |
 | `KC_PROXY_HEADERS` | `xforwarded` when behind an ingress / reverse proxy that sets `X-Forwarded-*`; leave unset when Keycloak is reached directly |
-| JVM heap | tune; defaults are large |
 
 The image also sets `KC_HEALTH_ENABLED=true`, `KC_METRICS_ENABLED=true` and `KC_HOSTNAME_STRICT=false`.
 

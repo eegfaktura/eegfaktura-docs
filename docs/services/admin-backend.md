@@ -68,7 +68,7 @@ Checks in `KeycloakJwtAuthenticator`:
 - signature algorithm RS256 only (the key selector is bound to `JWSAlgorithm.RS256`)
 - `exp` is required and must lie in the future
 - `iss` must equal `<keycloakAuthenticator.url>/realms/<keycloakAuthenticator.realm>` (from `KEYCLOAK_URL` / `KEYCLOAK_REALM`, trailing slash stripped), compared case-insensitively
-- the `aud` array must contain the expected audience `at.ourproject.vfeeg.admin` (configured via `keycloakAuthenticator.clientId`, overridable with `KEYCLOAK_AUDIENCE`), which the realm injects via the `admin-audience` mapper on the admin client (`realm/EEGFaktura.yaml` in eegfaktura-keycloak)
+- the `aud` array must contain the expected audience (`keycloakAuthenticator.clientId = ${?KEYCLOAK_AUDIENCE}` — no default, `KEYCLOAK_AUDIENCE` must be set, normally `at.ourproject.vfeeg.admin`), which the realm injects via the `admin-audience` mapper on the admin client (`realm/EEGFaktura.yaml` in eegfaktura-keycloak)
 
 Authorization: since 1.0.3 every route requires the realm role `superuser` in `realm_access.roles` (`RoleDirectives.requireSuperuser`); otherwise the answer is 403 with `{"error":"superuser role required"}`. There is no additional tenant check. The admin client is a public client with the standard flow, so any realm user can obtain a token with the admin audience; the role check is the boundary. A newly assigned role takes effect only with a fresh token.
 
@@ -79,7 +79,7 @@ Configuration is HOCON (Typesafe Config). The image's `CMD` passes `-Dconfig.fil
 HOCON sections:
 
 - `keycloak` block: Keycloak URL, realm and the `admin-cli` client (id + secret) used for user management through the Keycloak admin API
-- `keycloakAuthenticator` block: URL + realm (they form the expected issuer), the expected audience `at.ourproject.vfeeg.admin`, optional `jwksUrl`
+- `keycloakAuthenticator` block: URL + realm (they form the expected issuer), the expected audience from `KEYCLOAK_AUDIENCE` (required, no default), optional `jwksUrl`
 - `app.routes.ask-timeout` (default 10 s)
 - `pekko.grpc.client` entries for `RegisterEegService` and `RegisterPontonService`
 - `slick.pgsql.vfeeg` DB connection (Slick + HikariCP)

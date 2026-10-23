@@ -68,11 +68,9 @@ Connection details are provided as Kubernetes Secrets (or, in the local stack, a
 | eda-xp | `eda` (write) | Flyway 10.20.0 (`db/migration`), run by `MigrationRunner` at startup; Slick 3.5.1 for access |
 | admin-backend | `base` (read via Slick) | none (no in-repo migrations) |
 
-## Schema dumps vs. Flyway
+## Flyway and pre-existing `billingj` tables
 
-Some deployments initialize the schema from a `pg_dump --schema-only` snapshot taken from a reference instance. This works for `base`, `eda`, and `filestore`, but conflicts with billing's Flyway. When billing starts against a database that already contains `billingj.*` tables (because they were in the dump), Flyway tries to re-create them and fails.
-
-Workaround: `DROP SCHEMA billingj CASCADE` before the billing pod starts the first time, then let Flyway create the schema fresh.
+billing's Flyway has no baseline-on-migrate: if `billingj.*` tables exist without Flyway's history table (e.g. from a schema dump), billing fails at startup instead of adopting them.
 
 ## Notable tables
 
@@ -88,7 +86,7 @@ The member master record. Joined into nearly every customer-facing view.
 | `tenant` | the EEG's `tenant` — the scoping field |
 | `"participantNumber"`, `firstname`, `lastname` | member number and name |
 | `"businessRole"` | participant kind (`EEG_PRIVATE` / `EEG_BUSINESS`) |
-| `status` | `NEW`, `PENDING`, `ACCEPTED`, `ACTIVE`, `INACTIVE`, `ARCHIVED`, `REJECTED` |
+| `status` | a `ProcessStatusType` value (`model/participant.go`), in practice `NEW`, `PENDING`, `ACTIVE`, `INACTIVE` |
 | `"tariffId"` | participant tariff |
 
 Contact data lives in child tables keyed by `participant_id`: `base.contactdetail` (`email`, `phone`), `base.address` (`type` `RESIDENCE` / `BILLING`) and `base.bankaccount` (IBAN, SEPA mandate). For member-self lookups the backend matches `base.contactdetail.email` case-insensitively against the JWT `email` claim.
@@ -103,8 +101,8 @@ Primary key `(metering_point_id, tenant, participant_id)`; a partial unique inde
 | `participant_id` | FK to participant |
 | `tenant` | scoping field |
 | `direction` | `CONSUMPTION` or `GENERATION` |
-| `status` | `INIT`, `ACTIVE`, `INACTIVE` |
-| `process_state`, `last_process_state` | EDA process state (`NEW`, `PENDING`, `ACCEPTED`, `ACTIVE`, `INACTIVE`, `REJECTED`, …) |
+| `status` | `StatusType`: `INIT`, `ACTIVE`, `INACTIVE` |
+| `process_state`, `last_process_state` | EDA process state, `ProcessStatusType` (`model/participant.go`): `NEW`, `INIT`, `PENDING`, `APPROVED`, `ACTIVE`, `INACTIVE`, `REJECTED`, `REVOKED`, `INVALID`, `ARCHIVED`, `ABORTED`, `RESTORE`, `WARN` |
 | `consent_id` | EDA consent id |
 | `tariff_id` | metering-point tariff |
 
@@ -121,7 +119,7 @@ The participation factor is versioned in `base.metering_partition_factor` (`"par
 | `"allocationMode"` | `DYNAMIC` or `STATIC` |
 | `"settlementInterval"` | `MONTHLY` / `QUARTER` / `BIANNUAL` / `ANNUAL` |
 
-Important: `tenant`, `"rcNumber"` and `"communityId"` are separate values and may differ (e.g. GEA tenants `GCxxxxxx-00n` share one RC number stem). The customer SPA passes `communityId` as `ecId` in energystore URLs and the tenant in a `tenant` request header; do not assume one can be derived from the other.
+Important: `tenant`, `"rcNumber"` and `"communityId"` are separate values and may differ (e.g. GEA tenants `GCxxxxxx-00n` share one RC number stem). The customer SPA sends the tenant in a `tenant` header to backend, billing and filestore, but to energystore `communityId` as `ecId` in the URL and `"rcNumber"` as the `X-Tenant` header; do not assume one can be derived from the other (see [services/web](../services/web.md#tenant-vs-ecid)).
 
 ### `base.processhistory`
 
@@ -169,7 +167,8 @@ The energy data shape is documented in detail in [reference/obis-codes](../refer
 
 ## Related
 
-- [services/backend](../services/backend.md) — `base` and `eda` schema details
+- [services/backend](../services/backend.md) — `base` schema details
+- [services/eda-xp](../services/eda-xp.md) — `eda` schema (owned by eda-xp)
 - [services/billing](../services/billing.md) — Flyway migrations, billing-run state
 - [services/energystore](../services/energystore.md) — BadgerDB storage format
 - [services/postgres](../services/postgres.md) — cluster setup, user roles

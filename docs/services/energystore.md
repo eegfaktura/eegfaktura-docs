@@ -115,7 +115,7 @@ The customer SPA addresses energystore per EC; the tenant comes from a header (s
 | POST | `/eeg/v2/{ecid}/summary` | period summary |
 | POST | `/eeg/v2/{ecid}/billing-check` | checks before billing (L3 quarter hours, gaps, community totals); read only |
 | GET | `/eeg/{ecid}/lastRecordDate` | end of the last stored period |
-| POST | `/eeg/{ecid}/excel/export/{year}/{month}` | energy export, sent by mail (via the eda-xp gRPC mail service) |
+| POST | `/eeg/{ecid}/excel/export/{year}/{month}` | energy export, sent by mail via gRPC `ExcelAdminService` on eda-xp — currently broken: eda-xp does not implement that service |
 | POST | `/eeg/{ecid}/excel/report/download` | energy export as XLSX download |
 
 Two further routes, `POST /query/rawdata` and `POST /query/{ecid}/metadata`, use Basic auth (`ProtectApi`, see [Auth](#auth)). GraphQL (`/query`) offers the query `lastEnergyDate` and the mutation `singleUpload` (Excel import).
@@ -134,7 +134,7 @@ The `/query/rawdata` and `/query/{ecid}/metadata` routes take `Authorization: Ba
 
 ## Persistence
 
-Badger persists to the configured `persistence.path` (container `VOLUME /opt/rawdata`), mounted from a PVC. The PVC is the single source of truth for energy data — energystore does **not** own a PostgreSQL schema.
+Badger persists to the configured `persistence.path` (container `VOLUME /opt/rawdata`), the single source of truth for energy data — energystore does **not** own a PostgreSQL schema.
 
 ### Value-log garbage collection
 

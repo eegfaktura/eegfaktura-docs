@@ -42,20 +42,21 @@ flowchart LR
 |---|---|---|
 | **eegfaktura-backend** | renders a Go `html/template` → gRPC `SendMailService` → eda-xp SMTP | metering-point **activation** ("Aktivierung im Serviceportal"), **completion** ("Dein Zählpunkt ist aktiv"), **inactive** ("Dein Zählpunkt ist nicht mehr Teil der Energiegemeinschaft"); ZP list Excel to the EEG office address (`SendMailWithAttachment`) |
 | billing | renders a **FreeMarker** template → its **own** `JavaMailSender`/SMTP (`MAIL_*` env) → in-cluster relay (`eegfaktura-mailbrake` in the GitOps manifests, `eegfaktura-postfix` in docker-compose) | billing documents (PDF attached) |
-| energystore | gRPC `ExcelAdminService.SendExcel` on eda-xp's port 9093 | energy Excel report to the requesting user (`POST /eeg/{ecid}/excel/export/{year}/{month}`) |
+| energystore | gRPC `ExcelAdminService.SendExcel` on eda-xp's port 9093 — **currently broken**: eda-xp does not implement `ExcelAdminService` | energy Excel report to the requesting user (`POST /eeg/{ecid}/excel/export/{year}/{month}`) |
 | keycloak | its own SMTP (configured on the instance; not in `realm/EEGFaktura.yaml`) | password reset, e-mail verification, the "set your password" mail that admin-backend triggers for new accounts (`executeActionsEmail(UPDATE_PASSWORD)`) |
 
-backend and energystore use the gRPC hop through `eda-xp`; billing and keycloak talk SMTP
+backend and energystore use the gRPC hop through `eda-xp` (energystore's currently fails, see below); billing and keycloak talk SMTP
 directly.
 
 !!! note "energystore's Excel mail has no server"
     eda-xp's gRPC server registers only `SendMailService` and `RegisterPontonService`; it does
-    not implement `ExcelAdminService`, so energystore's `SendExcel` call fails. Note the template engines differ per sender: the backend uses Go
+    not implement `ExcelAdminService`, so energystore's `SendExcel` call fails.
+
+Note the template engines differ per sender: the backend uses Go
 `html/template` (see [Templates & conventions](#templates-conventions) below), while billing
 renders with **FreeMarker** (`BillingEmailDefaultTemplate.ftl`, `MAIL_NO_REPLY_TO` sender,
 `Cc:` the issuer; sent as multipart/alternative with a plain-text part and
-`Auto-Submitted: auto-generated`). Any per-tenant mail-text editing therefore has to be designed per path — the
-two do not share a template store.
+`Auto-Submitted: auto-generated`). The two do not share a template store.
 
 ## Recipient address handling
 
