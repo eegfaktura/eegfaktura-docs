@@ -121,7 +121,7 @@ The backend's default labels are in its `config.yaml` (`eda-process-versions`).
 
 ## XXE hardening
 
-`scala.xml.XML.loadString` on attacker-controlled XML without XXE defenses is unsafe: scala-xml versions < 2.2 do not have secure-by-default parsing. eda-xp uses **scala-xml 2.3.0**, which is secure by default (DOCTYPE declarations disallowed), so inbound XML parsing is XXE-hardened.
+`scala.xml.XML.loadString` on attacker-controlled XML without XXE defenses is unsafe: scala-xml versions < 2.2 do not have secure-by-default parsing. eda-xp uses **scala-xml 2.3.0**, which is secure by default (its default parser in `XMLLoader` configures `disallow-doctype-decl`, the external-entity features, `load-external-dtd` and secure processing), so inbound XML parsing is XXE-hardened.
 
 This protection applies anywhere in eda-xp that consumes inbound XML; keep scala-xml at ≥ 2.2 to retain it.
 

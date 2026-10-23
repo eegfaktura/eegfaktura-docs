@@ -60,7 +60,7 @@ Three tables in the `postgres-energy` cluster (`migrations/0001_init.sql`, `0002
 
 | Column | Type | Notes |
 |---|---|---|
-| `tenant_id` | text | space partition key (hash, `number_partitions => 16` in `0001_init.sql`; planned 128 for prod) |
+| `tenant_id` | text | space partition key (hash, `number_partitions => 16` in `0001_init.sql`; ADR-0011 in `gemeinstrom/eegfaktura-platform` plans 128 for production) |
 | `ec_id` | text | EEG identifier |
 | `metering_point` | text | OBIS-style ID (AT…) |
 | `meter_code` | text | full OBIS code, e.g. `1-1:1.9.0 G.01` (T-/R-variants accepted; see [reference/obis-codes](../reference/obis-codes.md)) |

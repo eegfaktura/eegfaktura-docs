@@ -26,7 +26,7 @@ For the per-service schema layout, see [Architecture / Databases](../architectur
 |----------|---------|-------|
 | `<main-database>` | backend, billing, filestore, eda-xp, admin-backend | name is env-specific (`eegfaktura` in the local stack) |
 | `keycloak` | keycloak | managed entirely by Keycloak |
-| `pontonxp` | PONTON adapter | only when a real PONTON link is wired |
+| `pontonxp` | Ponton X/P messenger (external, not an eegfaktura component) | exists in production (the platform's ArgoCD runbook backs it up); no eegfaktura service connects to it |
 
 ## Schema ownership
 

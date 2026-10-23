@@ -58,7 +58,7 @@ eda-xp additionally keeps a Pekko Persistence journal and snapshots on local dis
 
 ## Connection model
 
-In the GitOps manifests the database credentials come from a Kubernetes Secret (host and some user names from ConfigMaps); in the local stack they are docker-compose environment variables. The code does not assume per-schema database users: in the local stack (`eegfaktura-docker-compose`) all application services connect as the same application user.
+In the GitOps manifests the database credentials come from a Kubernetes Secret (host and some user names from ConfigMaps); in the local stack they are docker-compose environment variables. The code does not assume per-schema database users: in the local stack (`eegfaktura-docker-compose`) and in the GitOps manifests (Secret `eegfaktura-postgresql-eegfaktura-secret`) all application services connect as the same application user.
 
 | Service | Schema scope | Migration tool |
 |---------|--------------|----------------|
