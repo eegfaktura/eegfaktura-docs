@@ -7,7 +7,7 @@ The customer-facing single-page application. Served by Caddy from a built static
 | | |
 |---|---|
 | Language | TypeScript |
-| Framework | React |
+| Framework | React 18 + Ionic 7, built with Vite 6 |
 | Server | Caddy |
 | Auth | OIDC Authorization Code + PKCE |
 | Backends consumed | backend, billing, energystore, filestore |
@@ -21,7 +21,7 @@ Two role categories meet here:
 | `EEG_USER` | own participant data, own energy reports, own documents |
 | `EEG_ADMIN` | EEG-wide data: all members, all metering points, billing actions |
 
-A `vfeeg-superuser` sees data for all tenants in their `tenant` claim and can switch between them via a dropdown.
+The SPA reads the groups from the `access_groups` claim (`/EEG_ADMIN`, `/EEG_USER`, `/EEG_OWNER`). A user with the realm role `superuser` passes the tenant checks of backend and energystore and gets **all** EEGs in the community dropdown (`GET /api/eeg/user/get-user`); every other user gets the EEGs in their `tenant` claim.
 
 ## UI structure
 
@@ -29,13 +29,14 @@ Left navigation:
 
 | Item | Purpose |
 |------|---------|
-| **Messages** | last EDA messages (only when PONTON is wired; routine energy data is filtered out). Diagnostic. |
-| **Dashboard** | energy balance + finances for the current billing period |
-| **`<EEG name>`** | EEG master data and settings |
-| **Mitglieder** | member list + detail view |
-| **Tarife** | member fees, consumer and producer tariffs |
+| **Messages** (`/page/notifications`) | notifications from the backend (`GET /api/eeg/notifications/{start}`), e.g. EDA process outcomes and import reports; reloaded on every visit and on community switch |
+| **Dashboard** (`/page/dashboard`) | energy balance + finances for the current billing period |
+| **`<EEG name>`** (`/page/eeg`) | EEG master data and settings |
+| **Mitglieder** (`/page/participants`, default route) | member list + detail view |
+| **Tarife** (`/page/rates`) | member fees, consumer and producer tariffs |
+| **Prozesse** (`/page/processes`) | EDA processes; shown only to `EEG_ADMIN` and only for online (EDA-connected) EEGs |
 
-The EEG dropdown in the settings menu lets a multi-tenant user switch between EEGs they belong to (the `tenant` claim is an array).
+The "Auswahl Gemeinschaft" dropdown in the user popover lets a multi-tenant user switch between EEGs (the `tenant` claim is an array). The selected tenant is kept in `localStorage` (`tenant`).
 
 ## Dashboard semantics
 
@@ -46,30 +47,36 @@ The dashboard uses a two-color encoding consistently across charts and bars:
 
 Tile cards:
 
-- "Mitglieder" — active / inactive as of the reference date
-- "Zählpunkte" — active / inactive per billing period, split into consumer / producer
-- "Tarifzuordnung", "Produktion und Verteilung", "Finanzen: Eingekauft / Verkauft", "Marge EEG"
-
-`Marge EEG` is roughly `Verkaufseinnahmen - Einkaufskosten`.
+- "Übersicht EEG":
+    - "Mitglieder" — active / inactive (plus "in Anmeldung", if any), counted from the current state of each member's metering points: active = at least one active metering point; inactive = all left, archived, rejected or moved to another member
+    - "Zählpunkte" — count split into "Abnehmer" (consumer) / "Einspeiser" (producer); the "inaktive" figure is a hard-coded `0`
+    - "Tarife" — number of metering points per tariff
+- "Übersicht Stromproduktion und Verteilung" — "Produziert", "Verteilt", "EVU", each with the previous period for comparison
+- "Energiemengen" — "Eingekauft" / "Verkauft"
 
 ## Backend wiring
 
-The customer SPA addresses four backends with distinct conventions:
+The customer SPA addresses four backends with distinct conventions (prefixes are the `VITE_*` values from `.env.production`):
 
-| Backend | URL prefix | Auth caveat |
-|---------|------------|-------------|
-| backend (Go) | `/api/eeg/v2/<ecId>/...` | `tenant` claim must contain `ecId` |
-| billing | `/cash/...` | `Tenant` header + EEG_ADMIN required |
-| energystore | `/energystore/...` | `X-Tenant` header |
-| filestore | `/filestore/...` | PyJWT — see service page |
+| Backend | URL prefix | Tenant header | Auth caveat |
+|---------|------------|---------------|-------------|
+| backend (Go) | `/api/...` (e.g. `/api/eeg`, `/api/participant`, `/api/meteringpoint/...`) | `tenant` = selected tenant | header must be in the `tenant` claim (case-insensitive), unless realm role `superuser` |
+| billing | `/cash/api/...` | `tenant` = selected tenant | every request requires `EEG_ADMIN` |
+| energystore | `/energystore/eeg/v2/<ecId>/...`, `/energystore/query` | `X-Tenant` = the EEG's **rcNumber** | header must be in the `tenant` claim, unless `superuser` |
+| filestore | `/filestore/graphql`, `/filestore/filestore/<fileId>` | `tenant` | PyJWT — see service page |
 
 Caddy in the customer-web container does **not** proxy these. The Ingress (typically NGINX with `rewrite-target: /$2`) handles the routing in cluster.
 
+## Billing run (since 1.8.0)
+
+- The run starts asynchronously: `POST /cash/api/billing` answers `202` (or `409` if a run is already active) with the run id; the SPA polls `GET /cash/api/billingRuns/{id}` every 2 s until `DONE`/`NEW` (preview) or `FAILED`, and shows the run's persisted `errorSummary` on failure. Opening the billing panel while a run is `RUNNING` attaches to that run.
+- Time-of-use tariffs (ZVT): for tariffs in mode "Zeitbasiert" the SPA sends the tariff time windows with the energystore report request, receives per-window sums (`buckets`) per metering point, and forwards buckets plus the windows echoed by energystore to billing. Simple tariffs never carry buckets.
+
 ## Runtime configuration
 
-The SPA fetches `/config/keycloak-config.json` at startup; Caddy serves it from `/srv` with template processing (keys `auth-server-url`, `realm`, `resource` — the `resource` is the client id `at.ourproject.vfeeg.app`).
+The SPA fetches `/config/keycloak-config.json` at startup; Caddy serves it from `/srv` with template processing (keys under `app`: `auth-server-url`, `realm`, `resource` — the `resource` is the client id, default `at.ourproject.vfeeg.app`). The template fills them from the container env vars `KEYCLOAK_URL`, `KEYCLOAK_REALM` and `KEYCLOAK_CLIENT_ID` (local defaults when unset); `src/main.tsx` builds the OIDC authority as `<auth-server-url>/realms/<realm>/`.
 
-Backend service URLs are baked in at build time via `VITE_API_SERVER_URL`, `VITE_ENERGY_SERVER_URL`, `VITE_BILLING_SERVER_URL`, and `VITE_FILESTORE_SERVER_URL`.
+Backend service URLs are baked in at build time via `VITE_API_SERVER_URL`, `VITE_ENERGY_SERVER_URL`, `VITE_BILLING_SERVER_URL`, and `VITE_FILESTORE_SERVER_URL` (`.env.production`: `/api`, `/energystore`, `/cash`, `/filestore`).
 
 For local development, `pnpm run dev` starts Vite on port **5173** with proxies `/api`→9080, `/energystore`→9081, `/cash`→9095.
 
@@ -78,16 +85,16 @@ For local development, `pnpm run dev` starts Vite on port **5173** with proxies 
 1. SPA loads from Caddy.
 2. Unauthenticated → redirect to Keycloak (`at.ourproject.vfeeg.app` client, PKCE).
 3. On callback, the SPA receives the JWT.
-4. The SPA parses `tenant` (array), `access_groups`, `email`.
-5. `tenant.ecId = base.eeg.community_id` is used to scope API URLs.
+4. The SPA parses `tenant` (array), `access_groups`, `realm_access.roles`, `email`.
+5. The selected tenant goes into the `tenant` header. After the EEG is loaded, `ecId` (= `base.eeg."communityId"`) scopes the energystore URLs and `rcNr` (= `base.eeg."rcNumber"`) is sent to energystore as `X-Tenant`.
 
-If `tenant` is empty (e.g. a `vfeeg-superuser` user attribute was forgotten in Keycloak), the EEG dropdown is empty and the dashboard cannot load.
+If `tenant` is empty for a non-superuser (the user attribute was forgotten in Keycloak), the EEG dropdown is empty and the dashboard cannot load.
 
 ## `tenant` vs `ecId`
 
-The customer SPA uses `ecId` (= `community_id`) in URLs. The JWT carries `tenant`. They are typically the same value, but this depends on the Keycloak user-attribute mapper. If the `tenant` attribute is set to the legacy `rcNumber` instead of `communityId`, all backend calls return 403.
+The customer SPA uses three identifiers: the selected **tenant** (from the JWT `tenant` claim, matching `base.eeg.tenant`) for backend, billing and filestore; `ecId` (= `"communityId"`) in the energystore URLs; and `rcNr` (= `"rcNumber"`) as the energystore `X-Tenant` header, which energystore also uses as its storage key.
 
-When provisioning a user, set the `tenant` attribute to the EEG's `community_id`.
+The trap: where an EEG's tenant differs from its rcNumber (e.g. GEA tenants `GCxxxxxx-00n` with rcNumber `GCxxxxxx`), the claim holds the tenant but not the rcNumber. Backend calls succeed, every energystore call returns 403, and the dashboard stays empty. Superusers do not see it, because they bypass the tenant check. For such an EEG the user's `tenant` attribute must also contain the rcNumber.
 
 ## Form caveats from operational experience
 
@@ -97,16 +104,16 @@ When provisioning a user, set the `tenant` attribute to the EEG's `community_id`
 ## Build and image
 
 - Source: `eegfaktura-web`
-- Stack: React 18.2.0, `@ionic/react` + `@ionic/core` 7.x, Vite 5, TypeScript 5.1.6, React Router 5.3.4, Redux Toolkit, `oidc-client-ts` ^3.0.0 + `react-oidc-context` ^3.0.0, recharts ^2.10.3 (charts), i18next, react-hook-form. Package manager pnpm (CI pins 9.12.1). Node 20.18.0 (`.nvmrc`). Build-time i18n via `vite-plugin-i18next-loader`.
-- Build: Vite; produces a static `dist/`. The `build` npm script is `tsc && vite build`, but **CI runs `vite build` only** (skips `tsc`) because there are ~30 pre-existing TS errors; Vite transpiles without type-checking, so the bundle builds while `tsc` would fail.
-- Runtime image: Caddy 2.8.4 serving the static bundle on port **8080**, static `dist/` at `/var/www/html/vfeeg-web/`.
-- Tag scheme: `sha-<short>` (docker/metadata-action `type=sha,format=short,prefix=sha-`), plus `latest` on the default branch.
-- **Build Node version**: pin to `node:20-alpine`. `node:22-alpine` produced a vendor chunk that crashed at boot with `Object.defineProperty called on non-object` inside the `@oozcitak/dom` init graph (xmlbuilder2 dependency). Same source compiles cleanly under Node 20. The deeper root cause has not been isolated; the pin is the surgical workaround.
-- **`events` polyfill**: xmlbuilder2 imports the Node built-in `events`. Vite/Rollup since v3 do not polyfill Node built-ins automatically; the `events` npm package must be a direct dependency.
+- Stack (resolved versions from `pnpm-lock.yaml`): React 18.3 (`^18.2.0`), `@ionic/react` + `@ionic/core` 7.x, Vite 6 with `@vitejs/plugin-react` 4.7 and `@vitejs/plugin-legacy` 6.1, TypeScript 5.6, React Router 5.3.4, Redux Toolkit 2, `oidc-client-ts` ^3.0.0 + `react-oidc-context` ^3.0.0, recharts 2.x (charts), i18next, react-hook-form, xlsx, xmlbuilder2. Tests: vitest 3 + Testing Library (jsdom). Build-time i18n via `vite-plugin-i18next-loader` (`locales/`).
+- Package manager: **pnpm only**, version pinned in `package.json` (`packageManager: pnpm@9.12.1`); CI installs with `--frozen-lockfile`. Node 20.18.0 (`.nvmrc`, used by CI via `setup-node`).
+- Build: `pnpm run build` = `tsc && vite build`, produces a static `dist/`. Since 1.8.0 the release image is built this way, so a type error stops the release.
+- Runtime image: `caddy:2.8.4` serving the static bundle on port **8080** from `/var/www/html/vfeeg-web/`, running as the non-root user `app` (UID/GID 1000). The Dockerfile only copies the prebuilt `dist/`; the SPA is built on the CI runner.
+- Tag scheme (docker/metadata-action): `latest` on the default branch, branch/PR refs, semver tags, and `sha-<short>`.
+- **Build Node version**: keep Node 20. A Node 22 build produced a vendor chunk that crashed at boot with `Object.defineProperty called on non-object` inside the `@oozcitak/dom` init graph (xmlbuilder2 dependency). The deeper root cause has not been isolated.
 
 ## Caddy security headers
 
-The default Caddy config in some historical builds emits **no** security headers, exposing the SPA to easy XSS. Production deployments should add a `header` block:
+The `caddy.conf` shipped in the image sets **no** security headers. A `header` block would look like this:
 
 ```caddy
 header {
@@ -123,7 +130,7 @@ The exact CSP depends on which third-party assets the SPA loads.
 
 ## AGPL § 13 footer
 
-The SPA must surface a link to the source repository (footer + `/about`) for AGPL § 13 compliance, as do all SPAs that ship the AGPL-licensed software.
+Since 1.8.0 the Info/Impressum footer names the licence (AGPL-3.0) and links the source code of all components (github.com/eegfaktura), as AGPL-3.0 § 13 asks for a network service.
 
 ## Related
 
