@@ -33,10 +33,10 @@ For the per-service schema layout, see [Architecture / Databases](../architectur
 
 | Schema | Owner | Migration tool |
 |--------|-------|----------------|
-| `base` | backend | Go-native runner / pg_dump-restore |
-| `eda` | backend + eda-xp | shared |
-| `billingj` | billing | Flyway |
-| `filestore` | filestore | Python migration runner |
+| `base` | backend | golang-migrate v4 (embedded `migrations/*.sql`, run on startup; files generated with Atlas from `schema.sql`). billing reads the view `base.billing_masterdata`, admin-backend reads `base` tables (no migrations of its own) |
+| `eda` | eda-xp (backend does not use it) | Flyway (`db/migration`, default schema `eda`, run at startup) |
+| `billingj` | billing | Flyway via Spring Boot (`spring.flyway.default-schema=billingj`) |
+| `filestore` | filestore | Alembic (`alembic upgrade head` in `entrypoint.sh`) |
 
 A `pg_dump --schema-only` restore conflicts with billing's Flyway. See the "schema-dump vs Flyway" section in [Architecture / Databases](../architecture/databases.md) for the `DROP SCHEMA billingj CASCADE` workaround.
 
