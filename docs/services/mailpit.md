@@ -54,7 +54,7 @@ The SMTP relay password is provided as a Docker secret (`eegfaktura-smtp-passwor
 
 ## Production
 
-Production typically uses an external transactional-mail provider rather than running a relay in-stack. The relay in the local stack exists so that mail-sending code paths (billing, Keycloak, EDA-mail) can be exercised end to end against a real upstream SMTP. Do not fabricate provider specifics here — they are deployment-specific and not part of the compose repo.
+In the GitOps manifests billing relays through `eegfaktura-mailbrake` (`MAIL_HOST` in its ConfigMap, see the note above); eda-xp's SMTP transports are configured in its own `application.conf`. The relay in the local stack exists so that mail-sending code paths (billing, Keycloak, EDA-mail) can be exercised end to end against a real upstream SMTP. Do not fabricate provider specifics here — they are deployment-specific and not part of the compose repo.
 
 ## Related
 
