@@ -42,8 +42,8 @@ The SMTP relay password is provided as a Docker secret (`eegfaktura-smtp-passwor
 
 | Service | Trigger |
 |---------|---------|
-| backend | member notifications (metering-point activation/completion) — **rendered in the backend, then sent via gRPC to `eda-xp`'s `SendMailService`**, which relays to this SMTP relay. See [architecture/email](../architecture/email.md). |
-| billing | run-completion email, billing-document delivery |
+| backend | member notifications (metering-point activation/completion) — **rendered in the backend, then sent via gRPC to `eda-xp`'s `SendMailService`**, which sends it over eda-xp's **own** SMTP transport (`epmsmail.admin.javaxmail`), not through this relay. See [architecture/email](../architecture/email.md). |
+| billing | billing-document delivery (its own `MAIL_*` SMTP settings point at this relay) |
 | keycloak | password reset, email verification |
 | eda-xp (in MAIL mode) | outbound EDA messages — but real PONTON-MAIL must reach ebutilities, not an arbitrary relay |
 
