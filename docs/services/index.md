@@ -17,19 +17,19 @@ Each service page covers:
 
 ### Backend layer (domain APIs)
 
-- **[backend](backend.md)** (Go) — master data: participants, metering points, EEGs, contracts
+- **[backend](backend.md)** (Go) — master data: participants, metering points, EEGs, tariffs; EDA process history
 - **[billing](billing.md)** (Java/Spring) — billing document generation, tariff application
 - **[energystore](energystore.md)** (Go + Badger) — energy data storage and per-period reports (production today)
-- **[energystore-v2](energystore-v2.md)** (Go + TimescaleDB) — pilot, planned cutover target
-- **[filestore](filestore.md)** (Python) — file storage and download endpoints
+- **[energystore-v2](energystore-v2.md)** (Go + TimescaleDB) — planned successor, not rolled out yet
+- **[filestore](filestore.md)** (Python) — member documents (contracts) and their downloads
 - **[eda-xp](eda-xp.md)** (Scala/Pekko) — EDA protocol gateway for network operator communication
-- **[eda-mock](eda-mock.md)** (Scala) — EDA mock for development / testing
+- **[eda-mock](eda-mock.md)** (Dev zone only, `traefik/whoami` echo) — HTTP sink for eda-xp's outbound calls; no code, no MQTT
 - **[admin-backend](admin-backend.md)** (Scala/Pekko) — VFEEG superuser API for cross-instance maintenance
 
 ### Frontend layer (SPAs)
 
 - **[web](web.md)** (React) — customer-facing web UI for community members
-- **[admin-web](admin-web.md)** (React Admin) — VFEEG maintenance UI
+- **[admin-web](admin-web.md)** (React + MUI) — VFEEG maintenance UI
 
 ### Platform layer (infrastructure)
 

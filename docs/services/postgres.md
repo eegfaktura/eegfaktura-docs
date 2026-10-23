@@ -3,21 +3,20 @@
 PostgreSQL cluster. Hosts the main application database (multiple schemas), the Keycloak database, and optionally a PONTON-adapter database.
 
 !!! info "A second Postgres cluster for time-series data"
-    With [energystore-v2](energystore-v2.md) in the pilot, there is a separate **`postgres-energy`** Postgres cluster with the **TimescaleDB extension** that holds energy time-series only. The main `postgres` cluster documented on this page continues to hold master data (`base`, `eda`, `billingj`, `filestore`).
+    For [energystore-v2](energystore-v2.md) (planned successor, not rolled out yet) there is a separate **`postgres-energy`** Postgres cluster with the **TimescaleDB extension** that holds energy time-series only. The main `postgres` cluster documented on this page continues to hold master data (`base`, `eda`, `billingj`, `filestore`).
 
-    The split is deliberate (ADR-0010 in the platform repo): time-series ingest has fundamentally different access patterns from OLTP master data, and TimescaleDB's hash-partitioning + compression match the time-series workload.
+    The split is deliberate: time-series ingest has fundamentally different access patterns from OLTP master data, and TimescaleDB's hash-partitioning + compression match the time-series workload.
 
 ## At a glance
 
 | | |
 |---|---|
 | Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0` |
-| Topology | typically single instance for dev; managed cluster (CloudNativePG) for production |
-| Storage | PVC (RWO) |
+| Topology | single instance in the local stack; the production Postgres is a separate image of the organisation and not part of the application manifests |
 | Schemas | `base`, `eda`, `billingj`, `filestore` (in the main DB) |
 
 !!! note "The local stack uses a custom Postgres image"
-    The local docker-compose stack runs `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0`, **not** an upstream `postgres:*` image. This custom image performs its own initialization internally: on first start it creates the `eegfaktura` application database and the `keycloak` database (via `DB_*` / `KEYCLOAK_DB_*` env vars) and initializes the data directory with locale `de_DE:UTF8` (`POSTGRES_INITDB_ARGS`). Locally it is published on host port `26432` (→ container `5432`). Production may use a different image and topology (see CloudNativePG below).
+    The local docker-compose stack runs `ghcr.io/eegfaktura/eegfaktura-postgresql:0.2.0`, **not** an upstream `postgres:*` image. This custom image performs its own initialization internally: on first start it creates the `eegfaktura` application database and the `keycloak` database (via `DB_*` / `KEYCLOAK_DB_*` env vars) and initializes the data directory with locale `de_DE:UTF8` (`POSTGRES_INITDB_ARGS`). Locally it is published on host port `26432` (→ container `5432`).
 
 For the per-service schema layout, see [Architecture / Databases](../architecture/databases.md).
 
@@ -25,50 +24,45 @@ For the per-service schema layout, see [Architecture / Databases](../architectur
 
 | Database | Used by | Notes |
 |----------|---------|-------|
-| `<main-database>` | backend, billing, filestore, eda-xp | name is env-specific |
+| `<main-database>` | backend, billing, filestore, eda-xp, admin-backend | name is env-specific (`eegfaktura` in the local stack) |
 | `keycloak` | keycloak | managed entirely by Keycloak |
-| `pontonxp` | PONTON adapter | only when a real PONTON link is wired |
+| `pontonxp` | Ponton X/P messenger (external, not an eegfaktura component) | exists in production (the platform's ArgoCD runbook backs it up); no eegfaktura service connects to it |
 
 ## Schema ownership
 
 | Schema | Owner | Migration tool |
 |--------|-------|----------------|
-| `base` | backend | Go-native runner / pg_dump-restore |
-| `eda` | backend + eda-xp | shared |
-| `billingj` | billing | Flyway |
-| `filestore` | filestore | Python migration runner |
+| `base` | backend | golang-migrate v4 (embedded `migrations/*.sql`, run on startup; files generated with Atlas from `schema.sql`). billing reads the view `base.billing_masterdata`, admin-backend reads `base` tables (no migrations of its own), eda-xp reads `base.eeg` |
+| `eda` | eda-xp (backend does not use it) | Flyway (`db/migration`, default schema `eda`, run at startup) |
+| `billingj` | billing | Flyway via Spring Boot (`spring.flyway.default-schema=billingj`) |
+| `filestore` | filestore | Alembic (`alembic upgrade head` in `entrypoint.sh`) |
 
-A `pg_dump --schema-only` restore conflicts with billing's Flyway. See the "schema-dump vs Flyway" section in [Architecture / Databases](../architecture/databases.md) for the `DROP SCHEMA billingj CASCADE` workaround.
+billing's Flyway does not adopt pre-existing `billingj` tables (no baseline-on-migrate); see [Architecture / Databases](../architecture/databases.md).
 
 ## Extensions
 
-Each service's required PostgreSQL extensions must be enabled. The most common one is `uuid-ossp` (for UUID generation in `base` schema defaults). A missing `uuid-ossp` causes `gen_random_uuid()` or `uuid_generate_v4()` calls in INSERTs to fail at runtime.
-
-The bootstrap Job creates the extension if it does not exist; ensure the bootstrap user has the right privilege.
+Each service's required PostgreSQL extensions must be enabled. The most common one is `uuid-ossp`: the `base` schema defaults use `uuid_generate_v4()`. backend's first embedded migration (`migrations/20250603103206_activeMeterView.up.sql`) runs `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` itself, so either the database user may create it or it must already exist. eda-xp's Flyway migrations use no UUID defaults (its legacy `migration.sql` is not run by Flyway). filestore uses the built-in `gen_random_uuid()` and needs no extension.
 
 ## Users and privileges
 
-Each application service has its own database user, scoped to its schemas. Connection details come from `Secret`s with consistent names per service:
+The application services share **one** database user on the main database (`eegfaktura` in the local stack, created by the custom image from `DB_USERNAME` / `DB_PASSWORD_FILE`); Keycloak has its own user and database (`KEYCLOAK_DB_*`). In the GitOps manifests the connection details come from two Secrets (names only):
 
-| Secret | Service |
+| Secret | Used by |
 |--------|---------|
-| `backend-db-secret` | backend |
-| `billing-db-secret` | billing |
-| `filestore-db-secret` | filestore |
-| `keycloak-db-secret` | keycloak (own database) |
+| `eegfaktura-postgresql-eegfaktura-secret` (keys `username`, `password`, `database`) | backend, billing, filestore, eda-xp, admin-backend |
+| `eegfaktura-postgresql-keycloak-secret` | keycloak (own database) |
 
-Schema creation requires a higher-privilege user (granted `CREATE` on the database and ownership of the per-service schemas); the per-service users are then used for normal operation.
+Because all services use the same user, schema separation is a convention of the code (each service migrates and writes its own schema), not a privilege boundary.
 
 ## postgres-energy (TimescaleDB, energystore-v2 only)
 
 A separate Postgres deployment hosts the TimescaleDB-backed time-series data for [energystore-v2](energystore-v2.md). Architectural choices:
 
 - **Hash-partitioned hypertable** on `tenant_id` for multi-tenant write isolation.
-- **Compression policy** on chunks past a configurable age.
-- **Continuous aggregates** for the hourly / daily / monthly rollups that settlement queries consume.
-- **pgBouncer** in front in production deployments.
+- **Compression policy** on chunks older than 30 days.
+- **Continuous aggregates** `energy_hourly` / `energy_daily`.
 
-The pilot uses a plain Postgres StatefulSet. Production targets **CloudNativePG (CNPG)** with primary + async read-replica. CNPG is referenced in `konzept.md` §4 but not yet deployed (see `feedback_cnpg_not_yet_in_stack`).
+energystore-v2 is not rolled out yet.
 
 ## Related
 

@@ -1,83 +1,63 @@
 # mosquitto
 
-Eclipse Mosquitto MQTT broker. The platform's message bus, used for EDA inbound dispatch (eda-xp → backend) and energy-data ingestion (publishers → energystore).
+Eclipse Mosquitto MQTT broker. The platform's message bus, used for EDA inbound dispatch (eda-xp → backend), outbound EDA requests (backend → eda-xp) and energy-data ingestion (eda-xp → energystore).
 
 ## At a glance
 
 | | |
 |---|---|
 | Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` |
-| Topology | single-instance StatefulSet |
 | Port | 1883 (plain), no TLS by default; internal only in the local stack (not published to the host) |
-| Persistence | PVC-backed |
-| Optional sidecar | `mosquitto-exporter` (Prometheus metrics) |
+| Persistence | `persistence true`, data under `/mosquitto/data/` |
 
-The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` (with `mosquitto.conf` baked in), rather than an upstream `eclipse-mosquitto` image. Port `1883` is reachable only inside the compose network; it is not published to the host.
+The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktura-mosquitto:latest` (with `mosquitto.conf` baked in, started with `mosquitto -c /mosquitto/config/mosquitto.conf`), rather than an upstream `eclipse-mosquitto` image. Port `1883` is reachable only inside the compose network; it is not published to the host. The dev-zone manifest in `eegfaktura-platform` runs the upstream `eclipse-mosquitto:2.0.22` image with the config from a ConfigMap.
 
 ## Topic catalogue
 
 !!! warning "The legacy topic for energystore is outdated"
-    The legacy README listed `eegfaktura/<tenant>/energy/<meterId>` as the energy topic. The actual production v1 stack uses `eda/response/<tenant>/protocol/cr_msg` (and `…/inverter_msg` for PV inverter feeds). The mismatch was discovered 2026-06-07 during the v2 cutover analysis. See [eda-xp.md#mqtt-output](eda-xp.md#mqtt-output).
+    The legacy README listed `eegfaktura/<tenant>/energy/<meterId>` as the energy topic. The actual production v1 stack uses `eda/response/<tenant>/protocol/cr_msg`. The mismatch was discovered 2026-06-07 during the v2 cutover analysis. See [eda-xp.md#mqtt-output](eda-xp.md#mqtt-output).
 
 | Topic (prod) | Publisher | Subscriber | Payload |
 |---|---|---|---|
-| `eda/<tenant>/protocol/<process_lower>` | eda-xp / eda-mock | backend | `EbMsMessage` (JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore | gzip + Base64 around `MqttEnergyMessage` JSON, not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
-| `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore | plain JSON `MqttEnergyMessage` (PV inverter; not encrypted) |
-| `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | [energystore-v2](energystore-v2.md) | plain `MqttEnergyMessage` JSON (pilot convention) |
+| `eda/response/<tenant>/protocol/<process_lower>` | eda-xp | backend (`eda/response/+/protocol/#`) | EDA message as JSON (circe) |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore (`eda/response/+/protocol/cr_msg`); the backend receives it via its wildcard but skips it | gzip + Base64 around the EbMsMessage JSON (energystore decodes it as `MqttEnergyMessage`), not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
+| `eda/response/<tenant>/protocol/cr_msg_history` | energystore (after each import) | backend (process history) | plain JSON: meter, conversation id, message code, periods |
+| `eda/response/<tenant>/command/<command>` | eda-xp | backend (`eda/response/+/command/#`) | JSON |
+| `eda/response/error` | eda-xp (`errorTopic`, request stream errors) | backend (logs it, no further handling) | error messages |
+| `eda/request` | backend | eda-xp | outbound EDA requests (JSON) |
+| `eegfaktura/<tenant>/energy/<meterId>` | upstream pilot publishers only | [energystore-v2](energystore-v2.md) | plain `MqttEnergyMessage` JSON (upstream pilot convention, not used in eegfaktura deployments) |
 
-`<tenant>` is the EEG's `community_id`. `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …).
+`<tenant>` is the community's market-participant id (RC/CC/GC number) as eda-xp puts it into the topic — the receiver of an inbound message, the sender of a request answer — lower-cased; energystore and backend upper-case it again. It is not `base.eeg.tenant`, which can differ (GEA). `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …; `cr_msg_03.03` is normalised to `cr_msg`).
 
-The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). The `cr_req_pt` topic (outbound period requests) is cleartext — request metadata only. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
+The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). All other topics are cleartext JSON. energystore v1 has a configured `…/protocol/inverter_msg` topic, but nothing publishes to it and v1 does not subscribe to it. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
 
 Subscriber-side details are documented per service: see [backend](backend.md) and [energystore](energystore.md).
 
-## QoS and retention
+## QoS and sessions
 
-The bus uses QoS 0 by default. Retained messages are not used.
+All eegfaktura clients use **QoS 1**: eda-xp publishes with `AtLeastOnce` and subscribes `eda/request` with QoS 1; backend and energystore subscribe with `mqtt.qos: 1`. Retained messages are not used. backend, energystore and eda-xp connect with persistent sessions (`cleanSession false`), so the broker queues QoS-1 messages for them while they are disconnected (with `persistence true` this survives a broker restart).
 
-Consequence: a consumer that is down during a publish loses that message. Recovery options:
-
-- For EDA inbound, the producer (eda-xp) re-sends after a configurable timeout, **or** the original network operator re-issues the EDA process.
-- For energy data, the publisher is expected to be idempotent for the same period (re-publishing the same period overwrites in energystore).
-
-For production deployments, increase QoS and enable persistence + retention on the inbound EDA topic.
+Consequence: a consumer that is down during a publish receives the message after reconnecting, within the broker's queue limits (see below). A message that energystore cannot decode is acknowledged and dropped; its data has to be requested again via EDA. Re-publishing the same period overwrites the values in energystore.
 
 ## Auth
 
-Username + password by default. Optional TLS / mTLS.
-
-The auth file is mounted via `ConfigMap` / `Secret`. Each connecting service has its own username:
-
-| Service | Role |
-|---------|------|
-| eda-xp / eda-mock | publisher on `eda/+/protocol/#` |
-| backend | subscriber on `eda/+/protocol/#` |
-| energy publisher | publisher on `eegfaktura/+/energy/#` |
-| energystore | subscriber on `eegfaktura/+/energy/#` |
-
-ACLs are configured in `mosquitto.conf` (or an `acl_file` referenced from it).
+The broker configurations in `eegfaktura-platform` (dev zone, pilot runbook) set `allow_anonymous true`, and none of the clients (backend, energystore, eda-xp) configures MQTT credentials. Access control relies on the broker being reachable only inside the cluster / compose network; there are no per-service users or topic ACLs.
 
 ## Config
 
-The main `mosquitto.conf` is typically mounted from a `ConfigMap`. Key directives:
+The main `mosquitto.conf` (dev-zone manifest in `eegfaktura-platform`; the local-stack image bakes in its own):
 
-| Directive | Typical value | Purpose |
-|-----------|---------------|---------|
+| Directive | Value | Purpose |
+|-----------|-------|---------|
 | `listener` | `1883` | bind port |
+| `allow_anonymous` | `true` | no client authentication |
 | `persistence` | `true` | enable on-disk persistence |
-| `persistence_location` | `/mosquitto/data/` | PVC mount |
-| `allow_anonymous` | `false` | require auth |
-| `password_file` | `/mosquitto/auth/passwords` | mounted from a Secret |
-| `acl_file` | `/mosquitto/auth/acl` | per-user topic ACLs |
-
-## Metrics
-
-An optional `mosquitto-exporter` sidecar (e.g. `sapcc/mosquitto-exporter`) exposes Prometheus metrics on a separate port. Useful for connection-count, message-rate, and queue-depth dashboards.
+| `persistence_location` | `/mosquitto/data/` | data directory |
+| `log_dest` / `log_type` | `stdout` / `error`, `warning`, `notice` | logging |
 
 ## Delivery semantics
 
-- The broker does **not** distinguish "no subscriber" from "delivered" — publishing to a topic nobody listens to silently succeeds. This is the dominant failure mode when adding new EDA protocol support; see [Architecture / Messaging](../architecture/messaging.md) gap point #5.
+- The broker does **not** distinguish "no subscriber" from "delivered" — publishing to a topic nobody listens to silently succeeds. This is the dominant failure mode when adding new EDA protocol support; see [Architecture / Messaging](../architecture/messaging.md#gap-points) gap point #6.
 
 ### MQTT 5 vs 3.1.1 — Shared Subscriptions caveat
 
@@ -89,7 +69,7 @@ Also: MQTT 5 §4.8.2 forbids `NoLocal=true` on a Shared Subscription. Setting it
 
 ### Burst-load caveat
 
-Mosquitto's default per-client `max_inflight_messages` and `max_queued_messages` are low enough that a sustained burst on `qos=1` can result in silent drops: the broker returns PUBACK to the publisher but the subscriber sees only a subset. The chart provides an `extraConfig` value to raise the limits for environments that need it. See the chart values for the current defaults.
+The config sets neither `max_inflight_messages` nor `max_queued_messages`, so Mosquitto's defaults apply (20 in-flight, 1000 queued messages per client). During a sustained QoS-1 burst towards a slow or disconnected subscriber, messages beyond the queue limit are dropped silently: the publisher still gets its PUBACK, the subscriber sees only a subset. Raise the limits in `mosquitto.conf` where large EDA bursts are expected.
 
 ## Related
 
