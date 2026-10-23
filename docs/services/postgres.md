@@ -32,7 +32,7 @@ For the per-service schema layout, see [Architecture / Databases](../architectur
 
 | Schema | Owner | Migration tool |
 |--------|-------|----------------|
-| `base` | backend | golang-migrate v4 (embedded `migrations/*.sql`, run on startup; files generated with Atlas from `schema.sql`). billing reads the view `base.billing_masterdata`, admin-backend reads `base` tables (no migrations of its own) |
+| `base` | backend | golang-migrate v4 (embedded `migrations/*.sql`, run on startup; files generated with Atlas from `schema.sql`). billing reads the view `base.billing_masterdata`, admin-backend reads `base` tables (no migrations of its own), eda-xp reads `base.eeg` |
 | `eda` | eda-xp (backend does not use it) | Flyway (`db/migration`, default schema `eda`, run at startup) |
 | `billingj` | billing | Flyway via Spring Boot (`spring.flyway.default-schema=billingj`) |
 | `filestore` | filestore | Alembic (`alembic upgrade head` in `entrypoint.sh`) |
@@ -41,7 +41,7 @@ billing's Flyway does not adopt pre-existing `billingj` tables (no baseline-on-m
 
 ## Extensions
 
-Each service's required PostgreSQL extensions must be enabled. The most common one is `uuid-ossp`: the `base` schema defaults use `uuid_generate_v4()`. backend's first migration (`database/migration/000001_init-setup.up.sql`) and eda-xp's `migration.sql` run `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` themselves, so either the database user may create it or it must already exist. filestore uses the built-in `gen_random_uuid()` and needs no extension.
+Each service's required PostgreSQL extensions must be enabled. The most common one is `uuid-ossp`: the `base` schema defaults use `uuid_generate_v4()`. backend's first embedded migration (`migrations/20250603103206_activeMeterView.up.sql`) runs `CREATE EXTENSION IF NOT EXISTS "uuid-ossp"` itself, so either the database user may create it or it must already exist. eda-xp's Flyway migrations use no UUID defaults (its legacy `migration.sql` is not run by Flyway). filestore uses the built-in `gen_random_uuid()` and needs no extension.
 
 ## Users and privileges
 

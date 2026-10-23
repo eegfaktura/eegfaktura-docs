@@ -19,12 +19,12 @@ See [services/mosquitto](../services/mosquitto.md) for configuration and deliver
 |---|---|---|---|
 | `eda/request` | backend | eda-xp | EbMsMessage request (cleartext JSON) |
 | `eda/response/<participant>/protocol/<process_lower>` | eda-xp | backend (`eda/response/+/protocol/#`) | EbMsMessage (cleartext JSON via circe) — inbound EDA messages and answers to requests |
-| `eda/response/<participant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around EbMsMessage JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encoding)); the backend skips it |
+| `eda/response/<participant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md); [energystore-v2](../services/energystore-v2.md) (not rolled out) cannot consume it yet | gzip + Base64 around EbMsMessage JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encoding)); the backend skips it |
 | `eda/response/<tenant>/protocol/cr_msg_history` | energystore (v1) | backend | cleartext JSON: metering point, `ecId`, conversation, message code and the stored periods (`start`/`end`) |
-| `eda/response/<participant>/protocol/error` | eda-xp | backend (logs it) | EbMsMessage with `errorMessage` (request not built/sent, or inbound message type without process) |
-| `eda/response/error` | eda-xp | backend (discards it) | error for a request payload that could not be parsed |
+| `eda/response/<participant>/protocol/error` | eda-xp | backend (logs it, no further handling) | EbMsMessage with `errorMessage` (request not built/sent, or inbound message type without process) |
+| `eda/response/error` | eda-xp | backend (logs it, no further handling) | error for a request payload that could not be parsed |
 | `eda/response/<tenant>/command/<command>` | eda-xp | backend (`eda/response/+/command/#`) | command JSON, e.g. `pontononlinestate` after a tenant registration |
-| `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | energystore-v2 in pilot | cleartext `MqttEnergyMessage` (pilot convention) |
+| `eegfaktura/<tenant>/energy/<meterId>` | upstream pilot publishers only, not used in eegfaktura deployments | energystore-v2 (upstream pilot) | cleartext `MqttEnergyMessage` (upstream pilot convention) |
 
 The participant slot is the message's market-participant id — for inbound messages the `receiver` (the community's RC/CC/GC number), for request answers the `sender` — lowercased by eda-xp; the backend and energystore uppercase it again. It is not the `ecId` (community id), which travels in the payload. `<process_lower>` is the EDA process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
 
@@ -154,13 +154,13 @@ The `cr_msg` payload is the EbMsMessage JSON of a `DATEN_CRMSG`; energystore dec
 }
 ```
 
-Timestamps are epoch milliseconds (circe encodes `java.util.Date` as `getTime`). v1 subscribes to the configured `mqtt.energySubscriptionTopic` (`eda/response/+/protocol/cr_msg`), Base64-decodes then gunzips the payload (`mqttclient/energyExecutor.go`), decodes the `meterCode` into a storage slot, writes the values to Badger, and publishes the stored periods on `eda/response/<tenant>/protocol/cr_msg_history` for the backend. v2 follows the same wire-format but writes to TimescaleDB instead — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
+Timestamps are epoch milliseconds (circe encodes `java.util.Date` as `getTime`). v1 subscribes to the configured `mqtt.energySubscriptionTopic` (`eda/response/+/protocol/cr_msg`), Base64-decodes then gunzips the payload (`mqttclient/energyExecutor.go`), decodes the `meterCode` into a storage slot, writes the values to Badger, and publishes the stored periods on `eda/response/<tenant>/protocol/cr_msg_history` for the backend. v2 (not rolled out) writes to TimescaleDB instead, but cannot consume this topic yet: its decoder expects a different envelope and its tenant extraction does not fit the topic — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
 
-Direction detection: a metering point is registered as a **producer** only if its payload contains a `P.01` or `P.01T` code. Receiving only `G.01` is ambiguous (consumers and producers both have a `G.01`) and the meter is then registered as a consumer.
+Direction detection: a new metering point is registered as a **producer** if its first payload contains a generation code — `1-1:2.9.0 G.01` / `G.01T` or `1-1:2.9.0 P.01` / `P.01T` (`utils.ExamineDirection`); the two `G.01` codes differ by their OBIS prefix (`2.9.0` production, `1.9.0` consumption). Otherwise it is registered as a consumer.
 
 ## MQTT QoS and retention
 
-eda-xp publishes with QoS 1 (at least once) and subscribes to `eda/request` with QoS 1; the backend (`mqtt.qos`) and energystore v1 are configured with QoS 1 as well. Retained messages are not used. A consumer that is down during a publish can lose that message — recovery relies on the producer re-sending (eda-xp) or on the original network operator re-issuing the EDA process.
+eda-xp publishes with QoS 1 (at least once) and subscribes to `eda/request` with QoS 1; the backend (`mqtt.qos`) and energystore v1 are configured with QoS 1 as well. Retained messages are not used. backend, energystore and eda-xp connect with persistent sessions (`cleanSession false`), so the broker queues QoS-1 messages for a disconnected consumer within its queue limits; messages beyond the limit are dropped (see [services/mosquitto](../services/mosquitto.md#qos-and-sessions)). eda-xp has no re-send of its own; lost energy data has to be requested again via EDA.
 
 ## MQTT protocol version
 

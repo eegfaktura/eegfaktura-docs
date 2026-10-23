@@ -18,7 +18,7 @@ The central Go service. Owns the master-data domain (participants, metering poin
 
 - CRUD for master data: `base.participant` (with `base.contactdetail`, `base.address`, `base.bankaccount`), `base.meteringpoint`, `base.metering_partition_factor`, `base.eeg`, `base.tariff`
 - EDA inbound dispatch: subscribes to MQTT topics for the protocols it cares about and updates state accordingly
-- Process-history append: every interaction (UI + EDA) is logged to `base.processhistory`
+- Process-history append: every EDA message the backend receives over MQTT (including the echo of its own requests) is logged to `base.processhistory`; UI actions are not
 - Member-self lookups: matches the JWT `email` claim (case-insensitive) against the participant's e-mail
 - Member mails via eda-xp's gRPC `SendMailService`: activation, metering point active, metering point no longer part of the community (`zp-inactive-mail-template`), metering-point list (Excel attachment)
 - Energy-data request summary: a background check (every 5 minutes) writes one summary notification per multi-meter energy-data request (process `ENERGY_REQUEST`)
@@ -83,11 +83,11 @@ After an owner change a metering point exists twice in a community: the old memb
 
 ### Outbound EDA caveats
 
-The grid operator validates inbound `ANFORDERUNG_*` payloads on receipt. Two recurring rejection causes:
+The grid operator validates inbound `ANFORDERUNG_*` payloads on receipt. Response codes seen on outbound requests (texts from `ECON_RESPONSE_CODES` in `model/mqtt.go`):
 
 | Code | Meaning | Trigger |
 |------|---------|---------|
-| 70 | Akzeptiert | nominal success |
+| 70 | Änderung/Anforderung akzeptiert | nominal success |
 | 82 | Prozessdatum falsch | request submitted outside the process's time window (for `EC_PRTFACT_CHANGE`: 09:00–17:00 Austrian time) |
 | 90 | Kein Smart Meter | meter not eligible for the requested process |
 | 94 | Keine Daten im angeforderten Zeitraum vorhanden | requested period is empty for this meter |

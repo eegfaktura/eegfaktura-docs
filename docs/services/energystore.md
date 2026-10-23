@@ -24,7 +24,7 @@ Go service that stores per-period energy time-series and answers report queries.
 
 - Subscribe to the MQTT energy-data topic, decode `MqttEnergyMessage`, persist to Badger
 - After each successful import, publish a short history record (metering point, conversation id, message code, periods) to `eda/response/<tenant>/protocol/cr_msg_history`, which the [backend](backend.md) writes into its process history
-- Serve per-period reports (consumption / production / EEG share) to the customer SPA and billing
+- Serve per-period reports (consumption / production / EEG share) to the customer SPA; billing gets the kWh through the SPA, it does not call energystore
 - Serve the network-operator's allocation values via the `AllocDynamicV2` pass-through (energystore does not compute allocations — see below)
 - Register new metering points with the correct direction (consumer vs producer) on first publish
 - Excel import (GraphQL `singleUpload`) and Excel energy export

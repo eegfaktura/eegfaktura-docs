@@ -21,7 +21,7 @@ Two role categories meet here:
 | `EEG_USER` | own participant data, own energy reports, own documents |
 | `EEG_ADMIN` | EEG-wide data: all members, all metering points, billing actions |
 
-The SPA reads the groups from the `access_groups` claim (`/EEG_ADMIN`, `/EEG_USER`, `/EEG_OWNER`). A user with the realm role `superuser` passes the tenant checks of backend and energystore and gets **all** EEGs in the community dropdown (`GET /api/eeg/user/get-user`); every other user gets the EEGs in their `tenant` claim.
+The SPA reads the groups from the `access_groups` claim (`/EEG_ADMIN`, `/EEG_USER`, `/EEG_OWNER`). A user with the realm role `superuser` passes the tenant checks of backend, energystore, billing and filestore and gets **all** EEGs in the community dropdown (`GET /api/eeg/user/get-user`); every other user gets the EEGs in their `tenant` claim.
 
 ## UI structure
 
@@ -94,7 +94,7 @@ If `tenant` is empty for a non-superuser (the user attribute was forgotten in Ke
 
 The customer SPA uses three identifiers: the selected **tenant** (from the JWT `tenant` claim, matching `base.eeg.tenant`) for backend, billing and filestore; `ecId` (= `"communityId"`) in the energystore URLs; and `rcNr` (= `"rcNumber"`) as the energystore `X-Tenant` header, which energystore also uses as its storage key.
 
-The trap: where an EEG's tenant differs from its rcNumber (e.g. GEA tenants `GCxxxxxx-00n` with rcNumber `GCxxxxxx`), the claim holds the tenant but not the rcNumber. Backend calls succeed, every energystore call returns 403, and the dashboard stays empty. Superusers do not see it, because they bypass the tenant check. For such an EEG the user's `tenant` attribute must also contain the rcNumber.
+The trap: where an EEG's tenant differs from its rcNumber (e.g. GEA tenants `GCxxxxxx-00n` with rcNumber `GCxxxxxx`), the claim holds the tenant but not the rcNumber. Backend calls succeed, every energystore call is rejected (403 on REST, 401 on GraphQL), and the dashboard stays empty. Superusers do not see it, because they bypass the tenant check. For such an EEG the user's `tenant` attribute must also contain the rcNumber.
 
 ## Form caveats from operational experience
 

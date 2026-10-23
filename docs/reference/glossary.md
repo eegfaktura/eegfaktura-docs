@@ -10,7 +10,7 @@ Domain terms used throughout the documentation.
 
 **Allocation model** — How the network operator shares the community's production among the consumers (`base.eeg."allocationMode"`, read-only in the customer SPA). `DYNAMIC` weights by consumption per quarter hour; `STATIC` uses fixed shares. eegfaktura does not compute the allocation; it stores the operator's values.
 
-**Approval** — Steps of the online registration process `EC_REQ_ONL`: `ZUSTIMMUNG_ECON` (the member consented in the grid operator's portal → metering point status `APPROVED`) and `ABSCHLUSS_ECON` (the metering point is part of the EEG → status `ACTIVE`).
+**Approval** — Steps of the online registration process `EC_REQ_ONL`: `ZUSTIMMUNG_ECON` (the member consented in the grid operator's portal → metering point process state `APPROVED`) and `ABSCHLUSS_ECON` (the metering point is part of the EEG → process state `ACTIVE`).
 
 **Community ID** — The EC-ID assigned by the network operator (`AT…`). Stored in `base.eeg."communityId"`. Also called **EC-ID** or **ecId** in the customer SPA, where it scopes the energystore URLs.
 

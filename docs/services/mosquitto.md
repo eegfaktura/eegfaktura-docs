@@ -20,14 +20,14 @@ The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktu
 | Topic (prod) | Publisher | Subscriber | Payload |
 |---|---|---|---|
 | `eda/response/<tenant>/protocol/<process_lower>` | eda-xp | backend (`eda/response/+/protocol/#`) | EDA message as JSON (circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore (`eda/response/+/protocol/cr_msg`); the backend receives it via its wildcard but skips it | gzip + Base64 around the `MqttEnergyMessage` JSON, not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
+| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | energystore (`eda/response/+/protocol/cr_msg`); the backend receives it via its wildcard but skips it | gzip + Base64 around the EbMsMessage JSON (energystore decodes it as `MqttEnergyMessage`), not encrypted ([wire format](eda-xp.md#cr_msg-payload-encoding)) |
 | `eda/response/<tenant>/protocol/cr_msg_history` | energystore (after each import) | backend (process history) | plain JSON: meter, conversation id, message code, periods |
 | `eda/response/<tenant>/command/<command>` | eda-xp | backend (`eda/response/+/command/#`) | JSON |
-| `eda/response/error` | eda-xp (`errorTopic`, request stream errors) | backend (logged only) | error messages |
+| `eda/response/error` | eda-xp (`errorTopic`, request stream errors) | backend (logs it, no further handling) | error messages |
 | `eda/request` | backend | eda-xp | outbound EDA requests (JSON) |
 | `eegfaktura/<tenant>/energy/<meterId>` | upstream pilot publishers only | [energystore-v2](energystore-v2.md) | plain `MqttEnergyMessage` JSON (upstream pilot convention, not used in eegfaktura deployments) |
 
-`<tenant>` is the EDA receiver id of the community as eda-xp puts it into the topic (lower-cased; energystore and backend upper-case it again). `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …; `cr_msg_03.03` is normalised to `cr_msg`).
+`<tenant>` is the community's market-participant id (RC/CC/GC number) as eda-xp puts it into the topic — the receiver of an inbound message, the sender of a request answer — lower-cased; energystore and backend upper-case it again. It is not `base.eeg.tenant`, which can differ (GEA). `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …; `cr_msg_03.03` is normalised to `cr_msg`).
 
 The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). All other topics are cleartext JSON. energystore v1 has a configured `…/protocol/inverter_msg` topic, but nothing publishes to it and v1 does not subscribe to it. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
 
@@ -35,7 +35,7 @@ Subscriber-side details are documented per service: see [backend](backend.md) an
 
 ## QoS and sessions
 
-All eegfaktura clients use **QoS 1**: eda-xp publishes with `AtLeastOnce` and subscribes `eda/request` with QoS 1; backend and energystore subscribe with `mqtt.qos: 1`. Retained messages are not used. eda-xp and energystore connect with persistent sessions (`cleanSession false`), so the broker queues QoS-1 messages for them while they are disconnected (with `persistence true` this survives a broker restart).
+All eegfaktura clients use **QoS 1**: eda-xp publishes with `AtLeastOnce` and subscribes `eda/request` with QoS 1; backend and energystore subscribe with `mqtt.qos: 1`. Retained messages are not used. backend, energystore and eda-xp connect with persistent sessions (`cleanSession false`), so the broker queues QoS-1 messages for them while they are disconnected (with `persistence true` this survives a broker restart).
 
 Consequence: a consumer that is down during a publish receives the message after reconnecting, within the broker's queue limits (see below). A message that energystore cannot decode is acknowledged and dropped; its data has to be requested again via EDA. Re-publishing the same period overwrites the values in energystore.
 
@@ -57,7 +57,7 @@ The main `mosquitto.conf` (dev-zone manifest in `eegfaktura-platform`; the local
 
 ## Delivery semantics
 
-- The broker does **not** distinguish "no subscriber" from "delivered" — publishing to a topic nobody listens to silently succeeds. This is the dominant failure mode when adding new EDA protocol support; see [Architecture / Messaging](../architecture/messaging.md) gap point #5.
+- The broker does **not** distinguish "no subscriber" from "delivered" — publishing to a topic nobody listens to silently succeeds. This is the dominant failure mode when adding new EDA protocol support; see [Architecture / Messaging](../architecture/messaging.md#gap-points) gap point #6.
 
 ### MQTT 5 vs 3.1.1 — Shared Subscriptions caveat
 

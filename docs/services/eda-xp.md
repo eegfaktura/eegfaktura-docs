@@ -173,7 +173,7 @@ eda/response/<participant>/protocol/cr_msg
 
 `cr_msg` (network-operator data response — contains per-meter, per-slot energy values) is the **only** topic that receives special encoding: the JSON is gzip-compressed then Base64-encoded (see below). It is **not** encrypted.
 
-Subscribers: [energystore (v1)](energystore.md) and [energystore-v2](energystore-v2.md). The backend subscribes to `eda/response/+/protocol/#` but skips `cr_msg`.
+Subscriber: [energystore (v1)](energystore.md); [energystore-v2](energystore-v2.md) (not rolled out) cannot consume it yet (see below). The backend subscribes to `eda/response/+/protocol/#` but skips `cr_msg`.
 
 ### CR_MSG payload encoding
 
