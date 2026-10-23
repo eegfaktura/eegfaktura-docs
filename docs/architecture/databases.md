@@ -2,7 +2,7 @@
 
 eegfaktura runs against **one or two PostgreSQL clusters**, depending on whether [energystore-v2](../services/energystore-v2.md) is deployed:
 
-- **`postgres`** — master data plus Keycloak's own logical database, optional Ponton adapter. Always present. In the local stack this is a single custom PostgreSQL image (`eegfaktura-postgresql`) that provisions both an `eegfaktura` application database and a separate `keycloak` database.
+- **`postgres`** — master data plus Keycloak's own logical database (in production also a `pontonxp` database of the external Ponton X/P messenger, which no eegfaktura component uses). Always present. In the local stack this is a single custom PostgreSQL image (`eegfaktura-postgresql`) that provisions both an `eegfaktura` application database and a separate `keycloak` database.
 - **`postgres-energy`** — a separate, optional second cluster (TimescaleDB) for energystore-v2. energystore-v2 lives in a separate repo and is not rolled out yet; it is not part of the production manifests.
 
 For the v1 stack only the first cluster exists; energystore v1 stores time-series in an **embedded BadgerDB KV store on a persistent volume**, not in PostgreSQL.
@@ -27,7 +27,7 @@ postgres-energy cluster (energystore-v2 only; TimescaleDB)
     └── schema_migrations   — applied migration files
 ```
 
-The exact main-database name is environment-specific (e.g. `eegfaktura`). Each service takes it from its own config (filestore `DB_DATABASE`, billing `JDBC_DATABASE_URL`, backend `database.dbname` in its config / `VFEEG_BACKEND_DATABASE_DBNAME`) rather than hard-coding.
+The exact main-database name is environment-specific (e.g. `eegfaktura`). Each service takes it from its own config (filestore `DB_DATABASE`, billing `JDBC_DATABASE_URL`, backend `database.dbname` in its config / `VFEEG_BACKEND_DATABASE_DBNAME`, admin-backend `DATABASE_DBNAME`, eda-xp `slick.pgsql.local.db.url`) rather than hard-coding.
 
 ## Why a separate cluster for time-series
 
@@ -44,9 +44,9 @@ Each schema is owned by exactly one service. Other services do not write to it.
 
 | Schema | Owner | Notes |
 |--------|-------|-------|
-| `base` | backend | Largest and most central schema. Master data and EDA process history. Auto-migrated on startup (golang-migrate). Read by billing (view `base.billing_masterdata`) and admin-backend. |
+| `base` | backend | Largest and most central schema. Master data and EDA process history. Auto-migrated on startup (golang-migrate). Read by billing (view `base.billing_masterdata`), admin-backend and eda-xp (`base.eeg`, to fill a missing `ecId`). |
 | `eda` | eda-xp | Tables `tenantconfig`, `inbox`, `outbox`, `conversation`. Slick for access, Flyway for migrations (`defaultSchema("eda")`, `baselineOnMigrate`). backend does not use this schema. |
-| `billingj` | billing | Flyway-migrated (`ddl-auto=validate`). Conflict with full-DB dumps — see "schema dumps" below. |
+| `billingj` | billing | Flyway-migrated (`ddl-auto=validate`). Pre-existing tables without Flyway history stop the start — see [below](#flyway-and-pre-existing-billingj-tables). |
 | `filestore` | filestore | File metadata only (Alembic). Five tables: `file_categories`, `storages`, `file_containers`, `files`, `file_attributes`. Blobs live on the local filesystem, not in the database. |
 | `keycloak` (separate DB) | Keycloak | Keycloak's own logical database; managed entirely by Keycloak, no application access. |
 
@@ -58,14 +58,14 @@ eda-xp additionally keeps a Pekko Persistence journal and snapshots on local dis
 
 ## Connection model
 
-Connection details are provided as Kubernetes Secrets (or, in the local stack, as docker-compose environment variables). The code does not assume per-schema database users: in the local stack (`eegfaktura-docker-compose`) all application services connect as the same application user.
+In the GitOps manifests the database credentials come from a Kubernetes Secret (host and some user names from ConfigMaps); in the local stack they are docker-compose environment variables. The code does not assume per-schema database users: in the local stack (`eegfaktura-docker-compose`) all application services connect as the same application user.
 
 | Service | Schema scope | Migration tool |
 |---------|--------------|----------------|
 | backend | `base` (write) | golang-migrate v4 (embedded `migrations/*.sql`, version table in `base`), auto-run on startup; migrations are generated with Atlas from `schema.sql` (`atlas migrate diff`) |
 | billing | `billingj` (write), `base.billing_masterdata` (read) | Flyway via Spring Boot (`db/migration/V1_*`, `spring.flyway.default-schema=billingj`, `ddl-auto=validate`) |
 | filestore | `filestore` | Alembic, `alembic upgrade head` in the entrypoint |
-| eda-xp | `eda` (write) | Flyway 10.20.0 (`db/migration`), run by `MigrationRunner` at startup; Slick 3.5.1 for access |
+| eda-xp | `eda` (write), `base.eeg` (read) | Flyway 10.20.0 (`db/migration`, `defaultSchema("eda")`, `baselineOnMigrate`), run by `MigrationRunner` at startup; Slick 3.5.1 for access |
 | admin-backend | `base` (read via Slick) | none (no in-repo migrations) |
 
 ## Flyway and pre-existing `billingj` tables
@@ -86,7 +86,7 @@ The member master record. Joined into nearly every customer-facing view.
 | `tenant` | the EEG's `tenant` — the scoping field |
 | `"participantNumber"`, `firstname`, `lastname` | member number and name |
 | `"businessRole"` | participant kind (`EEG_PRIVATE` / `EEG_BUSINESS`) |
-| `status` | a `ProcessStatusType` value (`model/participant.go`), in practice `NEW`, `PENDING`, `ACTIVE`, `INACTIVE` |
+| `status` | a `ProcessStatusType` value (`model/participant.go`); the backend sets `PENDING` on `POST /participant` and `ACTIVE` on confirm (column default `NEW`) |
 | `"tariffId"` | participant tariff |
 
 Contact data lives in child tables keyed by `participant_id`: `base.contactdetail` (`email`, `phone`), `base.address` (`type` `RESIDENCE` / `BILLING`) and `base.bankaccount` (IBAN, SEPA mandate). For member-self lookups the backend matches `base.contactdetail.email` case-insensitively against the JWT `email` claim.
@@ -113,7 +113,7 @@ The participation factor is versioned in `base.metering_partition_factor` (`"par
 | Column | Purpose |
 |--------|---------|
 | `tenant` | primary key; the scoping identifier compared with the token's `tenant` claim (matches `participant.tenant`) |
-| `"communityId"` | the EC-ID issued by the network operator (`AT00300...`) |
+| `"communityId"` | the EC-ID issued by the network operator (`AT…`) |
 | `"rcNumber"` | RC number (`RC...`, `TE...`, `GC...`, `CC...`) |
 | `area` | `LOCAL` / `REGIONAL` / `BEG` / `GEA` |
 | `"allocationMode"` | `DYNAMIC` or `STATIC` |
@@ -123,7 +123,7 @@ Important: `tenant`, `"rcNumber"` and `"communityId"` are separate values and ma
 
 ### `base.processhistory`
 
-Log of EDA process messages written by the backend: one row per message with `"conversationId"`, `type`, `issuer`, `direction` (`IN` / `OUT`), `protocol`, `date` and the message as JSON. This table grows continuously with platform activity; queries must be filtered (do not `SELECT *` without a `date`/`tenant` predicate).
+Log of EDA process messages written by the backend: one row per message it receives over MQTT (including the echo of its own requests and energystore's `cr_msg_history`) with `"conversationId"`, `type` (message code), `issuer`, `direction`, `protocol`, `date` and the message as JSON. The column default of `direction` is `OUT`, but the backend writes every row with `IN`; UI actions are not logged here. This table grows continuously with platform activity; queries must be filtered (do not `SELECT *` without a `date`/`tenant` predicate).
 
 Other `base` tables: `tariff` (versioned, PK `(id, version)`, view `base.activeTariff`), `notification`, `gridoperators`. The view `base.billing_masterdata` is the read interface for billing.
 

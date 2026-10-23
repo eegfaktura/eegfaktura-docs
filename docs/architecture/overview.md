@@ -44,7 +44,15 @@ flowchart LR
   ES --- MQ
   EX --- MQ
   BE -.->|pub/sub| MQ
+
+  BE -.->|gRPC mail| EX
+  ES -.->|gRPC master data| BE
+  AB -.->|gRPC register| BE
+  AB -.->|gRPC Ponton| EX
+  AB -->|admin API| KC
 ```
+
+Solid arrows are HTTP calls (and SQL to PostgreSQL), `---` is MQTT, dotted arrows from a service are gRPC (`9092` on the backend, `9093` on eda-xp). eda-xp additionally reads `base.eeg` directly and talks to the external Ponton X/P messenger and to tenant mailboxes.
 
 ## Service tiers
 
@@ -56,10 +64,10 @@ Each backend owns a slice of domain logic and exposes a REST API consumed by the
 
 | Service | Language | Owns | Detail |
 |---------|----------|------|--------|
-| **backend** | Go | Master data: participants, metering points (Zählpunkte), EEGs, contracts, tariffs | [services/backend.md](../services/backend.md) |
+| **backend** | Go | Master data: participants, metering points (Zählpunkte), EEGs, tariffs; EDA process history | [services/backend.md](../services/backend.md) |
 | **billing** | Java / Spring | Billing document generation, tariff application, billing-run state | [services/billing.md](../services/billing.md) |
 | **energystore** | Go + BadgerDB | Energy time-series storage and per-period reports | [services/energystore.md](../services/energystore.md) |
-| **filestore** | Python | Document storage and download endpoints | [services/filestore.md](../services/filestore.md) |
+| **filestore** | Python | Member documents (contracts uploaded in the customer SPA; categories `contract`, `invoice`) and their downloads; billing PDFs are not stored here | [services/filestore.md](../services/filestore.md) |
 | **eda-xp** | Scala / Pekko | EDA protocol gateway (network operator communication) | [services/eda-xp.md](../services/eda-xp.md) |
 | **eda-mock** _(Dev zone only)_ | — (two `traefik/whoami` echo containers, no code of its own) | answers eda-xp's outbound Ponton/KEP calls with HTTP 200; no responses, no MQTT | [services/eda-mock.md](../services/eda-mock.md) |
 | **admin-backend** | Scala / Pekko | Superuser maintenance API (realm role `superuser`): EEG registration, Keycloak users, cross-instance maintenance | [services/admin-backend.md](../services/admin-backend.md) |
@@ -99,8 +107,8 @@ Stateful dependencies, deployed alongside the application services.
 ### Energy data arrives from a network operator
 
 1. PONTON (external EDA adapter) POSTs an XML message to **eda-xp**.
-2. eda-xp dispatches the XML to the matching scalaxb-generated handler by message code and version.
-3. Handler enriches the message with stored conversation state from prior outbound requests.
+2. eda-xp parses the XML with the scalaxb binding of its namespace (one package per schema version) and maps the document type to a message code and EDA process.
+3. eda-xp enriches the message with the stored conversation of the original outbound request, if there is one (`eda.conversation`).
 4. eda-xp publishes the result to **mosquitto** under `eda/response/<receiver>/protocol/<process>` (`<receiver>` = the community's RC/CC/GC number, lower-cased).
 5. **backend** subscribes to the relevant protocols and updates state in PostgreSQL.
 6. For energy data (`cr_msg`), **energystore** subscribes to `eda/response/+/protocol/cr_msg`, persists the time-series and publishes `cr_msg_history`, which the backend writes to the process history.
@@ -113,9 +121,9 @@ The billing period is configurable per EEG — monthly, quarterly, biannual, or 
 
 1. **web** (EEG admin) calls **billing** to create a preview.
 2. The request carries the network-operator-allocated values: **web** reads them from the **energystore** report and sends them as `allocations` (for time-variable tariffs per window bucket `BASE`/`T1`/`T2`). billing has no outbound HTTP client; it reads master data and tariffs from the backend view `base.billing_masterdata` in the shared database.
-3. The run is **asynchronous**: `POST /api/billing` answers `202 Accepted` with a `billingRunId`, the UI polls `GET /api/billingRuns/{id}` (a second start for the same period gets `409`).
-4. billing applies `verbrauchertarif × G.03` and `erzeugertarif × (G.01T − P.01T)` per metering point (per window bucket for time-variable tariffs).
-5. Preview documents (PDFs) are stored by billing itself in `billingj.file_data`; billing does not use filestore.
+3. The run is **asynchronous**: `POST /api/billing` answers `202 Accepted` with a `billingRunId`, the UI polls `GET /api/billingRuns/{id}`. A start while a run for the same period is still `RUNNING`, or after the final run, gets `409`.
+4. billing multiplies each metering point's `allocationKWh` by the tariff price. The web derives `allocationKWh` from the energystore report: consumers `utilization` (G.03), producers `production − allocation` (G.01 − P.01; where the operator delivers T variants, energystore stores those). For time-variable tariffs each window bucket is priced separately.
+5. The generated documents (PDFs) are stored by billing itself in `billingj.file_data`; billing does not use filestore.
 6. Admin triggers the **final billing** action; the run becomes immutable.
 
 See [reference/obis-codes](../reference/obis-codes.md) for the energy-data semantics, and [services/billing](../services/billing.md) for the run state machine.
@@ -126,15 +134,16 @@ Most day-to-day admin work in the customer SPA triggers an EDA process against t
 
 | UI action | EDA process | Effect |
 |-----------|-------------|--------|
-| Add member + Zählpunkt | (no EDA) | `base.participant` + `base.meteringpoint` row, status `NEW` |
-| Activate Zählpunkt | `EC_REQ_ONL` | `NEW` → `INIT` (request sent) → `PENDING` (operator answer) → `APPROVED` (customer consent) → `ACTIVE` (completion); `REJECTED` / `INVALID` on rejection |
-| Offline registration of a Zählpunkt | `EC_REQ_OFF` (`ANFORDERUNG_ECOF`) | offline variant of the registration (`*_ECOF` messages), same state handling as `EC_REQ_ONL` |
+| Add member + Zählpunkt | (no EDA) | `base.participant` row with status `PENDING`; `base.meteringpoint` row with `process_state` `NEW` (`status` `INIT`) |
+| Confirm member (or add a Zählpunkt to an active member) in an online EEG | `EC_REQ_ONL` (`ANFORDERUNG_ECON`) | participant `ACTIVE`; metering point `NEW` → `INIT` (request sent) → `PENDING` (operator answer, code 99) → `APPROVED` (customer consent, code 175) → `ACTIVE` (`ABSCHLUSS_ECON`); `REJECTED` / `INVALID` on rejection or abort |
+| Same, metering point with activation mode `OFFLINE` | `EC_REQ_OFF` (`ANFORDERUNG_ECOF`) | offline variant of the registration (`*_ECOF` messages), same state handling as `EC_REQ_ONL` |
+| Confirm member in an EEG that is not online | (no EDA) | participant and metering points set to `ACTIVE` directly |
 | Revoke (deactivate) Zählpunkt | `CM_REV_SP` (backend sends `AUFHEBUNG_CCMS`) | `status` / `process_state` → `INACTIVE`, `inactivesince` = consent end |
 | Change participation factor | `EC_PRTFACT_CHANGE` | the operator accepts it only between 09:00 and 17:00 Austrian time and applies it from the next day (outside it rejects with „Prozessdatum falsch“); web warns outside the window but still allows sending |
 | Request energy data | `CR_REQ_PT` | operator delivers per-period values (G.01 / G.02 / G.03 etc.) as `DATEN_CRMSG` on the `cr_msg` topic |
-| Request metering-point list | `EC_PODLIST` | reconciles the operator-side list of metering points in this EEG |
+| Request metering-point list | `EC_PODLIST` | the operator sends the list (`SENDEN_ECP`); the backend mails it as XLSX to the EEG's e-mail address and updates the community's metering points from it |
 
-Revocations also arrive operator- or customer-initiated (`CM_REV_IMP`, `CM_REV_CUS`; `CM_REV_SP` carries both the backend's own request and the answers). They set the metering point's `status` and `process_state` to `INACTIVE` (`database/meteringPointDao.go`). A `REVOKED` process state is defined in `model/participant.go` but not set by the revocation flow.
+Revocations also arrive operator- or customer-initiated (`CM_REV_IMP` with `AUFHEBUNG_CCMI`, `CM_REV_CUS` with `AUFHEBUNG_CCMC`; `CM_REV_SP` carries both the backend's own request and the answers). `AUFHEBUNG_CCMI` / `AUFHEBUNG_CCMC`, the own `AUFHEBUNG_CCMS` and an `ANTWORT_CCMS` with code 176 set the metering point's `status` and `process_state` to `INACTIVE` (`database/meteringPointDao.go`); an `ABLEHNUNG_CCMS` leaves it active. A `REVOKED` process state is defined in `model/participant.go` but not set by the revocation flow.
 
 See [services/backend](../services/backend.md#eda-subscriptions) for the subscription-and-handler mapping.
 

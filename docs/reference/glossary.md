@@ -4,71 +4,71 @@ Domain terms used throughout the documentation.
 
 ## Domain
 
-**Abrechnungsperiode** — Billing period. Configurable per EEG (`base.eeg."settlementInterval"`): `MONTHLY`, `QUARTER`, `BIANNUAL`, or `ANNUAL`. Once chosen it is changed only in coordination with the platform operator.
+**Abrechnungsperiode** — Billing period. Configurable per EEG (`base.eeg."settlementInterval"`): `MONTHLY`, `QUARTER`, `BIANNUAL`, or `ANNUAL`. Read-only in the customer SPA; a superuser can change it in admin-web (Portal Manager).
 
 **Abrechnungs-Workflow** — Three-phase per-period process: preview creation, preview updates, final billing. After the final-billing action the run is immutable.
 
-**Allocation model** — How surplus production is shared among members (`base.eeg."allocationMode"`). `DYNAMIC` weights by per-period consumption; `STATIC` uses fixed shares.
+**Allocation model** — How the network operator shares the community's production among the consumers (`base.eeg."allocationMode"`, read-only in the customer SPA). `DYNAMIC` weights by consumption per quarter hour; `STATIC` uses fixed shares. eegfaktura does not compute the allocation; it stores the operator's values.
 
 **Approval** — Steps of the online registration process `EC_REQ_ONL`: `ZUSTIMMUNG_ECON` (the member consented in the grid operator's portal → metering point status `APPROVED`) and `ABSCHLUSS_ECON` (the metering point is part of the EEG → status `ACTIVE`).
 
-**Community ID** — The EC-ID assigned by the network operator (`AT00300...`, 33 characters). Stored in `base.eeg."communityId"`. Also called **EC-ID** or **ecId** in the customer SPA, where it scopes the energystore URLs.
+**Community ID** — The EC-ID assigned by the network operator (`AT…`). Stored in `base.eeg."communityId"`. Also called **EC-ID** or **ecId** in the customer SPA, where it scopes the energystore URLs.
 
 **EEG** — Erneuerbare-Energie-Gemeinschaft, an Austrian renewable energy community. One database row in `base.eeg`. One eegfaktura instance can host multiple EEGs (multi-tenant).
 
-**Energiedaten-XLSX** — Energy-data spreadsheet export used by admins to verify data before final billing. Worksheet "Energiedaten" contains one row per metering point × quarter-hour with OBIS values.
+**Energiedaten-XLSX** — Energy-data spreadsheet export used by admins to verify data before final billing. Produced by energystore (`excel/EnergyExport.go`): a sheet "Summary" and a sheet "Energiedaten" with header rows per metering point (id, name, direction, period) and one row per quarter hour, three value columns per consumer and two per producer; cells are coloured by data quality.
 
 **EVU** — Energieversorgungsunternehmen, the regular electricity supplier (distinct from the EEG). Surplus that cannot be allocated within the EEG goes to the EVU.
 
-**Mitglied** — Member of an EEG. Stored as `base.participant`. A member has at least one Zählpunkt.
+**Mitglied** — Member of an EEG. Stored as `base.participant`, with its Zählpunkte in `base.meteringpoint`. A member without an active Zählpunkt counts as inactive on the dashboard.
 
-**Mitgliedsbeitrag** — Member fee, a tariff of type `EEG`. Fixed amount per member.
+**Mitgliedsbeitrag** — Member fee, a tariff of type `EEG`. A fixed amount that billing adds as its own position on every billing run of the member.
 
 **Network operator** — Netzbetreiber. Operates the physical grid and the smart meters. Communicates with eegfaktura via the EDA protocol through PONTON.
 
-**Ortsgebiet** — Geographical scope / community form of the EEG (`base.eeg.area`): `LOCAL`, `REGIONAL`, `BEG` or `GEA`. Determined by the network operator, immutable.
+**Ortsgebiet** — Geographical scope / community form of the EEG (`base.eeg.area`): `LOCAL`, `REGIONAL`, `BEG` or `GEA`. Set when the EEG is registered (admin-web wizard); the customer SPA does not edit it.
 
-**PONTON** — Adapter system that bridges between EDA messages and the network operators. Acts as the external HTTP endpoint that `eda-xp` integrates with. Not deployed in dev / mock instances.
+**PONTON** — The Ponton X/P messenger (KEP) that exchanges EDA messages with the market partners. External HTTP endpoint that `eda-xp` integrates with; not deployed in the Dev zone (see eda-mock) or the local stack.
 
-**Process History** — Append-only log of every EDA conversation. Stored in `base.processhistory`. Surfaced in the customer SPA as the "Prozess-History" view.
+**Process History** — Log of the EDA messages the backend receives over MQTT (one row per message, including the echo of its own requests). Stored in `base.processhistory`; UI actions are not logged there. Surfaced in the customer SPA as the "Prozess-History" view.
 
-**rcNumber** — Market-partner number of the EEG (`RC...`, `GC...`, `CC...` in production, `TE...` for test). Stored in `base.eeg."rcNumber"`. The customer SPA sends it to energystore as the `X-Tenant` header, and energystore uses it as its storage key — so where it differs from the tenant, the user's `tenant` claim must also contain it (see [services/web](../services/web.md#tenant-vs-ecid)).
+**rcNumber** — Market-partner number of the EEG (e.g. `RC...`, `GC...`, `CC...`; test data uses `TE...`). Stored in `base.eeg."rcNumber"`. The customer SPA sends it to energystore as the `X-Tenant` header, and energystore uses it as its storage key — so where it differs from the tenant, the user's `tenant` claim must also contain it (see [services/web](../services/web.md#tenant-vs-ecid)).
 
 **Stammdaten** — Master data: participants, metering points, EEG settings, tariffs. Owned by the `backend` service in the `base` schema.
 
 **Stammdaten-XLSX-Import** — Bulk-import template (`/attachments/15` in the public docs). Brings new members and their metering points into eegfaktura in one shot, and can append metering points to existing members. **Update-by-import is not supported** — existing member data is never changed, and a metering point the member already has fails that row. See [Master Data Import](masterdata-import.md).
 
-**Tarif** — Tariff. Three types:
-- `EEG` — annual member fee, fixed per person
-- `VZP` — consumer Zählpunkt tariff, applied as ct/kWh × G.03 per billing period
-- `EZP` — producer Zählpunkt tariff, applied as ct/kWh × (G.01T − P.01T) per billing period
-- `AKONTO` — a fourth type present in the data model (`base.tariff.type`)
+**Tarif** — Tariff. Four types in the data model (`model/tariff.go`, `base.tariff.type`):
+- `EEG` — member fee, a fixed amount per member and billing run
+- `VZP` — consumer Zählpunkt tariff: ct/kWh × the kWh the web sends (report `utilization` = G.03) per billing period
+- `EZP` — producer Zählpunkt tariff: ct/kWh × (report `production − allocation` = G.01 − P.01) per billing period
+- `AKONTO` — present in the data model and the SPA's types; billing has no code for it
 
 `VZP` and `EZP` tariffs can be simple or time-based, see **ZVT**.
 
-**Teilnahmefaktor** (participation factor) — Percentage (0..100) per metering point per EEG. Determines the share of the metering point's consumption / production attributed to this EEG. A metering point can be in up to 5 EEGs; the sum of participation factors must not exceed 100. Default 100% for metering points activated before 2024-04-08. Changes (EDA process `EC_PRTFACT_CHANGE`) are only accepted by the grid operator between 09:00 and 17:00 Austrian time and take effect the next day; outside the window the grid operator rejects with code 82 „Prozessdatum falsch“. Since web 1.8.0 the form shows the window and warns before sending outside it (`src/util/PartFactWindow.util.ts`, hour check only; sending stays possible).
+**Teilnahmefaktor** (participation factor) — Percentage per metering point per EEG (the web form accepts more than 0 up to 100; new metering points and the Excel import default to 100). Determines the share of the metering point's consumption / production attributed to this EEG. A metering point can be in up to 5 EEGs; the sum of participation factors must not exceed 100 (the grid operator rejects with code 183 „Summe der gemeldeten Aufteilungsschlüssel übersteigt 100%“). Default 100% for metering points activated before 2024-04-08. Changes (EDA process `EC_PRTFACT_CHANGE`) are only accepted by the grid operator between 09:00 and 17:00 Austrian time and take effect the next day; outside the window the grid operator rejects with code 82 „Prozessdatum falsch“. Since web 1.8.0 the form shows the window and warns before sending outside it (`src/util/PartFactWindow.util.ts`, hour check only; sending stays possible).
 
 **Tenant** — In eegfaktura the tenant is the EEG. The string is the primary key `base.eeg.tenant` and appears on the user's Keycloak attribute `tenant` (JWT claim `tenant`, a string array, compared case-insensitively). Usually it equals the `rcNumber`; GEA tenants carry a suffix (`GCxxxxxx-00n`) and then differ from it.
 
 **Verteilungsmodell** — see Allocation model.
 
-**Zählpunkt (ZP)** — Metering point. Direction is `CONSUMPTION` or `GENERATION`. Identified by a 33-character AT-prefixed string assigned by the network operator. Status in the online registration flow: `NEW` → `PENDING` → `APPROVED` → `ACTIVE`; further states include `INACTIVE` (also the result of a revocation), `REJECTED`, `INVALID`, `ARCHIVED` (`model/participant.go`). `REVOKED` exists as a constant but is not set by the revocation flow.
+**Zählpunkt (ZP)** — Metering point. Direction is `CONSUMPTION` or `GENERATION`. Identified by a 33-character string starting with `AT`, assigned by the network operator (the web form checks the length). Process state in the online registration flow: `NEW` → `INIT` → `PENDING` → `APPROVED` → `ACTIVE`; further states include `INACTIVE` (also the result of a revocation), `REJECTED`, `INVALID`, `ARCHIVED` (`model/participant.go`). `REVOKED` exists as a constant but is not set by the revocation flow.
 
 **ZVT** — Zeitvariabler Tarif (time-of-use tariff), since web 1.8.0. A `VZP`/`EZP` tariff in mode "Zeitbasiert" has a base price plus up to two named time windows (15-minute raster, may cross midnight) with their own price. For billing, energystore returns per-window sums (`buckets`) per metering point, and the SPA forwards them with the window definitions to billing.
 
 ## Protocol
 
-**EDA** — Energie Daten Austausch Austria. Asynchronous XML messaging protocol for grid-operator communication.
+**EDA** — The Austrian energy-industry data exchange: asynchronous XML messaging (ebUtilities schemas) between grid operators and market participants such as EEGs.
 
-**EbMsMessage** — Inbound EDA message structure after scalaxb parsing. Wraps the XML payload with conversation metadata.
+**EbMsMessage** — eda-xp's JSON message model on MQTT, in both directions (message code, conversation id, sender / receiver, `ecId`, meter and energy data). eda-xp maps it from and to the EDA XML; it does not carry the XML itself.
 
 **EC_REQ_***/**CM_REV_*** etc. — EDA process codes. See [Messaging](../architecture/messaging.md) for the catalogue of codes used by eegfaktura.
 
-**messageCodeVersion** — EDA process version (e.g. `02.30`). Drives handler selection in `MessageHelper`. Distinct from the schema-version XML attribute.
+**messageCodeVersion** — Version label on an outbound request (e.g. `02.40`), stamped by the backend from its config `eda-process-versions.<MESSAGE_CODE>`. It is the schema set version, not the process version, and selects the XML builder in the message class's `getVersion()`; eda-xp sends it as Ponton header `MessageVersion`. Inbound documents are dispatched by their XML namespace instead.
 
-**OBIS** — Object Identification System. Standardized codes for energy-meter readings. Format `<medium>-<channel>:<group>.<attribute>.<storage>` followed by a vendor extension. eegfaktura uses a small canonical subset documented in [OBIS Codes](obis-codes.md).
+**OBIS** — Object Identification System. Standardized codes for energy-meter readings. eegfaktura sees them in the abbreviated `A-B:C.D.E` form followed by a token (`1-1:1.9.0 G.01`). eegfaktura uses a small canonical subset documented in [OBIS Codes](obis-codes.md).
 
-**G.01 / G.02 / G.03 / P.01** — eegfaktura's OBIS extensions. Roughly: G.01 = measured total, G.02 = theoretically allocatable share, G.03 = actually covered share, P.01 = surplus. Both consumer and producer Zählpunkte have a G.01 with different semantics.
+**G.01 / G.02 / G.03 / P.01** — The EDA tokens for the EEG quantities. Roughly: G.01 = measured total, G.02 = theoretically allocatable share, G.03 = actually covered share, P.01 = surplus. Both consumer and producer Zählpunkte have a G.01 with different semantics.
 
 **T-Variant** (e.g. `G.01T`) — value × participation factor / 100. Mandatory for billing periods starting 2024-04-08 or later.
 
@@ -76,11 +76,11 @@ Domain terms used throughout the documentation.
 
 **EEG_ADMIN** — Keycloak group (JWT claim `access_groups`). Full admin for the user's own tenant. Required for billing API calls.
 
-**EEG_OWNER** — Keycloak group. Reserved for future reporting use. No code path currently checks it.
+**EEG_OWNER** — Keycloak group. No code path checks it; admin-backend assigns it together with `EEG_ADMIN` to new community logins.
 
 **EEG_USER** — Keycloak group. Regular member. Sees only their own participant data in the customer SPA.
 
-**superuser** — Keycloak **realm role** (`realm_access.roles`), not a group. Cross-tenant maintenance role: backend and energystore skip the tenant check for it, and the customer SPA lists all EEGs. Required for admin-web login and the admin-backend routes.
+**superuser** — Keycloak **realm role** (`realm_access.roles`), not a group. Cross-tenant maintenance role: backend, energystore, billing and filestore skip the tenant check for it, and the customer SPA lists all EEGs. Required for admin-web login and the admin-backend routes.
 
 ## Components
 
@@ -92,13 +92,13 @@ Domain terms used throughout the documentation.
 
 **billing** — Java/Spring service. Generates billing documents, owns the `billingj` schema.
 
-**eda-xp** — Scala/Pekko EDA gateway. Speaks HTTP with PONTON, MQTT with the rest of the platform. Sometimes named `eda-xp-connector` or `xp-adapter` in legacy configs.
+**eda-xp** — Scala/Pekko EDA gateway. Speaks HTTP with PONTON (or mail with tenant mailboxes), MQTT with backend and energystore, and serves gRPC (member mails, Ponton registration). Sometimes named `eda-xp-connector` or `xp-adapter` in legacy configs.
 
 **eda-mock** — Dev-zone placeholder for the PONTON/KEP side: two `traefik/whoami` HTTP echo containers that answer eda-xp's outbound calls with 200; no code of its own, no MQTT, no grid-operator responses.
 
-**energystore** — Go + Badger service. Stores per-period energy time-series and answers report queries.
+**energystore** — Go + Badger service. Stores the quarter-hour energy values delivered by the network operator and answers report queries.
 
-**filestore** — Python service. Stores generated documents and serves member-side downloads.
+**filestore** — Python service. Stores member documents (contracts uploaded in the customer SPA) and serves authenticated downloads. Billing PDFs stay in billing's own schema.
 
 **web** — React SPA for community members. Customer-facing UI.
 
@@ -106,7 +106,7 @@ Domain terms used throughout the documentation.
 
 **Badger** — Embedded KV store used by energystore. Persists to a local volume.
 
-**Mosquitto** — Eclipse Mosquitto MQTT broker. The message bus for EDA inbound and energy-data ingestion.
+**Mosquitto** — Eclipse Mosquitto MQTT broker. The message bus for outbound EDA requests, inbound EDA messages and energy-data ingestion.
 
 
 ## Related
