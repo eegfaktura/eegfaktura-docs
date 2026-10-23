@@ -32,24 +32,25 @@ flowchart LR
   WEB --> ES
   WEB --> FS
   AWEB --> AB
-  AWEB --> BE
+  AWEB --> ES
   WEB --> KC
   AWEB --> KC
 
   BE --> PG
   BI --> PG
   FS --> PG
-  ES -.->|reads| PG
+  EX --> PG
+  AB --> PG
 
   ES --- MQ
   EX --- MQ
   EM --- MQ
-  BE -.->|subscribes| MQ
+  BE -.->|pub/sub| MQ
 ```
 
 ## Service tiers
 
-The local stack defines **13 services** (see `docker-compose.yaml`), grouped into three tiers below. The `eda-mock` stub is listed for completeness but is **not** part of the standard compose stack — the stack runs the real eda-xp connector (`eegfaktura-kep`).
+The local stack defines **13 services** (see `docker-compose.yaml`; plus a one-shot `eegfaktura-volume-permissions` helper that chowns the data volumes to UID/GID 1000), grouped into three tiers below. The `eda-mock` stub is listed for completeness but is **not** part of the standard compose stack — the stack runs the real eda-xp connector (`eegfaktura-kep`).
 
 ### Backend layer — domain APIs
 
@@ -110,13 +111,14 @@ See [Messaging](messaging.md) for the full inbound pipeline.
 
 ### Admin runs the period billing
 
-The billing period is configurable per EEG — monthly, quarterly, biannual, or yearly (see `base.eeg.billing_period`). The same flow runs once per chosen period.
+The billing period is configurable per EEG — monthly, quarterly, biannual, or yearly (see `base.eeg."settlementInterval"`: `MONTHLY` / `QUARTER` / `BIANNUAL` / `ANNUAL`). The same flow runs once per chosen period.
 
-1. **admin-web** or **web** (with `EEG_ADMIN` group) calls **billing** to create a preview.
-2. billing reads the network-operator-allocated values from **energystore** and master data from **backend** (or the database directly, depending on the call).
-3. billing applies `verbrauchertarif × G.03` and `erzeugertarif × (G.01T − P.01T)` per metering point.
-4. Preview documents are stored, member-readable via **filestore**.
-5. Admin triggers the **final billing** action; the run becomes immutable.
+1. **web** (EEG admin) calls **billing** to create a preview.
+2. The request carries the network-operator-allocated values: **web** reads them from the **energystore** report and sends them as `allocations` (for time-variable tariffs per window bucket `BASE`/`T1`/`T2`). billing has no outbound HTTP client; it reads master data and tariffs from the backend view `base.billing_masterdata` in the shared database.
+3. The run is **asynchronous**: `POST /api/billing` answers `202 Accepted` with a `billingRunId`, the UI polls `GET /api/billingRuns/{id}` (a second start for the same period gets `409`).
+4. billing applies `verbrauchertarif × G.03` and `erzeugertarif × (G.01T − P.01T)` per metering point (per window bucket for time-variable tariffs).
+5. Preview documents are stored, member-readable via **filestore**.
+6. Admin triggers the **final billing** action; the run becomes immutable.
 
 See [reference/obis-codes](../reference/obis-codes.md) for the energy-data semantics, and [services/billing](../services/billing.md) for the run state machine.
 
@@ -127,11 +129,11 @@ Most day-to-day admin work in the customer SPA triggers an EDA process against t
 | UI action | EDA process | Effect |
 |-----------|-------------|--------|
 | Add member + Zählpunkt | (no EDA) | `base.participant` + `base.metering_point` row, status `NEW` |
-| Activate Zählpunkt | `EC_REQ_ONL` | `NEW` → `ACTIVATED`; later `ACTIVE` on operator response |
-| Deactivate Zählpunkt | `EC_REQ_OFF` | `ACTIVE` → inactive on operator response |
-| Change participation factor | `EC_REQ_PRZ` | factor change takes effect on the next operator-confirmed day; allowed only Mon-Fri 09:00–17:00 |
-| Request energy data | `EC_REQ_ENE` | operator delivers per-period values (G.01 / G.02 / G.03 etc.) via `ENERGY_FILE_RESPONSE` |
-| Request participant list | `EC_REQ_LST` | reconciles the operator-side list of who is in this EEG |
+| Activate Zählpunkt | `EC_REQ_ONL` | `NEW` → `INIT` (request sent) → `PENDING` (operator answer) → `APPROVED` (customer consent) → `ACTIVE` (completion); `REJECTED` / `INVALID` on rejection |
+| Deactivate Zählpunkt | `EC_REQ_OFF` | `ACTIVE` → `INACTIVE` on operator response |
+| Change participation factor | `EC_PRTFACT_CHANGE` | the operator accepts it only between 09:00 and 17:00 Austrian time and applies it from the next day (outside it rejects with „Prozessdatum falsch“); web warns outside the window but still allows sending |
+| Request energy data | `CR_REQ_PT` | operator delivers per-period values (G.01 / G.02 / G.03 etc.) via `ENERGY_FILE_RESPONSE` |
+| Request participant list | `EC_PODLIST` | reconciles the operator-side list of who is in this EEG |
 
 Inbound (operator-initiated) flows include revocations (`CM_REV_SP`, `CM_REV_IMP`, `CM_REV_CUS`) which move a metering point to `REVOKED` without local action.
 
@@ -147,6 +149,6 @@ See [services/backend](../services/backend.md#eda-subscriptions) for the subscri
 
 ## Source repositories
 
-Each service is its own repository. The platform repository (`eegfaktura-platform`) is a separate repository that holds the deployment manifests and tooling for all of them.
+Each service is its own repository. Deployment manifests (Kustomize, synced by ArgoCD) live in `vfeeg-development/eegfaktura-gitops`; platform tooling, zones and ADRs in `vfeeg-development/eegfaktura-platform`.
 
 Service-to-repository mapping is documented per service page under [Services](../services/index.md).
