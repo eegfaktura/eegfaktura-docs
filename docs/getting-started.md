@@ -183,7 +183,10 @@ most common source of confusion:
     its `latest` points at the newest merge, not at anything released.
 
 The end-to-end flow (merge with CHANGELOG stamp → CI `sha-*` → `promote-image.yml`
-→ gitops and Compose pull requests → operator sync in ArgoCD) is documented in
+→ gitops and Compose pull requests → operator sync in ArgoCD) is defined in
+[`promote-image.yml`](https://github.com/vfeeg-development/eegfaktura-gitops/blob/main/.github/workflows/promote-image.yml)
+itself (its header comment explains each step); the CI side (`sha-*` / `latest`
+builds per source repo) is in
 [`build-pipeline.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/build-pipeline.md).
 
 ## 7. Repo & documentation map
