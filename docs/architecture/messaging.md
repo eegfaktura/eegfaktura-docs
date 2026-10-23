@@ -17,85 +17,90 @@ See [services/mosquitto](../services/mosquitto.md) for sizing and operational no
 
 | Topic pattern | Publisher | Subscriber | Payload |
 |---|---|---|---|
-| `eda/<tenant>/protocol/<process_lower>` | eda-xp | backend | EbMsMessage (cleartext JSON via circe) |
-| `eda/response/<tenant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around `MqttEnergyMessage` JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encoding)) |
-| `eda/response/<tenant>/protocol/inverter_msg` | eda-xp | energystore / energystore-v2 | cleartext `MqttEnergyMessage` (PV inverter telemetry) |
-| `eda/response/<tenant>/protocol/cr_req_pt` | eda-xp | backend | cleartext EbMsMessage (period-request workflow event) |
+| `eda/request` | backend | eda-xp | EbMsMessage request (cleartext JSON) |
+| `eda/response/<participant>/protocol/<process_lower>` | eda-xp | backend (`eda/response/+/protocol/#`) | EbMsMessage (cleartext JSON via circe) — inbound EDA messages and answers to requests |
+| `eda/response/<participant>/protocol/cr_msg` | eda-xp | [energystore (v1)](../services/energystore.md), [energystore-v2](../services/energystore-v2.md) | gzip + Base64 around EbMsMessage JSON (no encryption) ([wire format](../services/eda-xp.md#cr_msg-payload-encoding)); the backend skips it |
+| `eda/response/<tenant>/protocol/cr_msg_history` | energystore (v1) | backend | cleartext JSON: metering point, `ecId`, conversation, message code and the stored periods (`start`/`end`) |
+| `eda/response/<participant>/protocol/error` | eda-xp | backend (logs it) | EbMsMessage with `errorMessage` (request not built/sent, or inbound message type without process) |
+| `eda/response/error` | eda-xp | backend (discards it) | error for a request payload that could not be parsed |
+| `eda/response/<tenant>/command/<command>` | eda-xp | backend (`eda/response/+/command/#`) | command JSON, e.g. `pontononlinestate` after a tenant registration |
 | `eegfaktura/<tenant>/energy/<meterId>` | pilot energy publishers only | energystore-v2 in pilot | cleartext `MqttEnergyMessage` (pilot convention) |
 
-The tenant slot is the EEG's `community_id` / `ecId`. `<process_lower>` is the EDA process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
+The participant slot is the message's market-participant id — for inbound messages the `receiver` (the community's RC/CC/GC number), for request answers the `sender` — lowercased by eda-xp; the backend and energystore uppercase it again. It is not the `ecId` (community id), which travels in the payload. `<process_lower>` is the EDA process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
 
-!!! note "Legacy energy topic pattern in prod"
-    The energy topic pattern is `eda/response/+/protocol/cr_msg`. Some production configs may still reference the legacy form `eda/response/energy/+` — check the deployed config when reconciling subscriptions.
+!!! note "Legacy energy topic pattern"
+    The energy topic pattern is `eda/response/+/protocol/cr_msg`. The energystore repo's `config-prod.yaml` still carries the legacy form `eda/response/energy/+`; eda-xp never publishes there (its `energyTopic` config key is unused) — check the deployed config when reconciling subscriptions.
 
 !!! warning "CR_MSG is the only compressed topic"
-    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (the eda-xp source carries a `// Todo: Encrypt` comment — encryption is a documented TODO, not implemented). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encoding](../services/eda-xp.md#cr_msg-payload-encoding) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
+    `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (eda-xp contains no encryption code). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encoding](../services/eda-xp.md#cr_msg-payload-encoding) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
 
 ## EDA inbound pipeline
 
-eda-xp bridges EDA market communication to MQTT. It has **two inbound transports**: the Ponton X/P (KEP) adapter delivering AS4 over HTTP (port 6090), and email (IMAP/SMTP). Both feed the same handler chain below; responses are published to MQTT (`energy` / `cm` / `cp` / `error` topic prefixes), where the backend and energystore subscribe.
+eda-xp bridges EDA market communication to MQTT. It has **two inbound transports**: the Ponton X/P (KEP) EDA adapter POSTing SOAP envelopes over HTTP (port 6090, `/pontonxp/message`), and email (IMAP polling per tenant mailbox). Both feed the same mapping below; results are published under `eda/response/…`, where the backend and energystore subscribe.
 
-The end-to-end path of an inbound EDA message (shown for the Ponton transport; email follows the same chain from the upload step onward):
+The end-to-end path of an inbound EDA message (shown for the Ponton transport; email uses the same `XmlParseHandler` mapping and publish step):
 
 ```
-PONTON adapter (external, AS4 over HTTP on port 6090)
-   │ HTTP POST multipart/form-data
+PONTON EDA adapter (external, HTTP on port 6090)
+   │ HTTP POST SOAP envelope → /pontonxp/message
    ▼
-eda-xp: FileService.handleUpload
-   │ parseProcessName → (protocol, version)
+eda-xp: PontonRoute
+   │ ReceiverId listed in app.forward → forwarded unchanged to the other zone, stop here
    ▼
-eda-xp: MessageHelper.getEdaMessageFromHeader(protocol, version)
-   │ selects scalaxb handler by (protocol, schema-version)
+eda-xp: XmlParseHandler.reponseEbMsMessage
+   │ scalaxb.fromXML[Envelope], then pattern match on the document type
+   │ (per-version scalaxb binding); unknown type → ERROR_MESSAGE
    ▼
-Handler.fromXML(xmlNode): Try[EdaMessage]
-   │ scalaxb.fromXML with per-version schema
+PontonRoute.notificationFor
+   │ MessageHelper.EDAMessageCodeToProcessCode (message code → process);
+   │ no mapping → protocol "error"
    ▼
-MessageStorage.MergeMessage (actor)
-   │ loads prior conversation state from DB
-   │ enriches new message with stored context
+MqttPublisher → EbMsAggregator → ConversationEntity (actor)
+   │ loads the stored request by conversation id (eda.conversation)
+   │ mergeEbmsMessage (pattern match on messageCode) copies ecId, meter, …
    ▼
-mergeEbmsMessage (pattern match on messageCode)
-   │ wraps the message in the appropriate domain type
+MqttSystem → topic eda/response/<receiver>/protocol/<process>
    ▼
-MqttPublisher → topic eda/<tenant>/protocol/<process>
-   ▼
-backend: EDA subscription handler
-   │ hard-coded subscriptions per protocol
-   │ pattern-matches messageCode
+backend: MessageBroker route eda/response/+/protocol/#
+   │ callback per protocol (eda/edaSubscription.go)
+   │ switch on messageCode
    ▼
 DB write (metering-point status, process history, ...)
 ```
 
+Outbound requests take the reverse way: the backend publishes on `eda/request` (with the version label from `eda-process-versions`), eda-xp assigns ids, stores the conversation, sends the XML via Ponton or mail, and answers on `eda/response/<sender>/protocol/<process>`.
+
 ## EDA-process codes used
 
-The backend hard-codes subscriptions for these protocols. Anything not in this list is silently dropped on the broker side.
+The backend registers callbacks for these protocols (`eda/edaSubscription.go`, `mqtt/subscriptionHandler.go`). A message on any other protocol topic finds no callback and is dropped in the backend without a log.
 
 | Process | Direction | Purpose |
 |---------|-----------|---------|
-| `EC_REQ_ONL` | outbound | "Anmeldung Teilnahme Online" — Zählpunkt activation |
-| `EC_REQ_OFF` | outbound | Zählpunkt deactivation |
-| `EC_REQ_ENE` | outbound | Energy-data request |
+| `EC_REQ_ONL` | bidirectional | "Anmeldung Teilnahme Online" — Zählpunkt activation (`ANFORDERUNG_ECON` → `ANTWORT_ECON`, `ZUSTIMMUNG_ECON`, `ABSCHLUSS_ECON`, …) |
+| `EC_REQ_OFF` | bidirectional | Offline registration (`ANFORDERUNG_ECOF` → `…_ECOF`) |
 | `EC_PRTFACT_CHANGE` | bidirectional | Participation-factor change. Outbound `ANFORDERUNG_CPF`, inbound `ANTWORT_CPF` (accepted) or `ABLEHNUNG_CPF` (rejected). Grid operator only accepts requests Mon-Fri 09:00–17:00, effective the next day. |
-| `EC_REQ_LST` | outbound | Request participant list |
-| `EC_PODLIST` | inbound | Per-grid-operator metering-point list response |
-| `CM_REV_SP` | inbound | Revocation by service provider |
-| `CM_REV_IMP` | inbound | Revocation, import direction |
-| `CM_REV_CUS` | inbound | Revocation by customer |
-| `CR_MSG` | bidirectional | Energy data (per-slot values) and generic notifications |
-| `CR_REQ_PT` | inbound | Participant-list response |
+| `EC_PODLIST` | bidirectional | Metering-point list: outbound `ANFORDERUNG_ECP`, inbound `SENDEN_ECP` / `ABLEHNUNG_ECP` |
+| `CR_REQ_PT` | bidirectional | Energy-data request: outbound `ANFORDERUNG_PT`, inbound `ANTWORT_PT` / `ABLEHNUNG_PT` |
+| `CM_REV_SP` | bidirectional | Revocation by the service provider (`AUFHEBUNG_CCMS` → `ANTWORT_CCMS` / `ABLEHNUNG_CCMS`) |
+| `CM_REV_IMP` | inbound | Revocation (`AUFHEBUNG_CCMI`) |
+| `CM_REV_CUS` | inbound | Revocation by customer (`AUFHEBUNG_CCMC`) |
+| `CR_MSG` | inbound | Energy data (`DATEN_CRMSG`) — consumed by energystore; the backend handles the derived `cr_msg_history` from energystore |
+| `ERROR` | inbound | Errors from eda-xp; logged by the backend |
 
-Message codes inside an EDA message (e.g. `AUFHEBUNG_CCMS`, `ANTWORT_ECON`, `ONLINE_REG_COMPLETION`) determine the concrete state change. They are version-independent and matched in the backend handler with a `switch` on the message code.
+eda-xp also sends `ANFORDERUNG_GN` (process `MD_REQ_GN`); the backend registers no callback for `md_req_gn`, so its answers are dropped there.
+
+Message codes inside an EDA message (e.g. `AUFHEBUNG_CCMS`, `ANTWORT_ECON`, `ABSCHLUSS_ECON`) determine the concrete state change. They are version-independent and matched in the backend handler with a `switch` on the message code.
 
 ## Schema versions
 
 EDA distinguishes two kinds of "version":
 
-- **Process version** (`messageCodeVersion`) — e.g. `02.30`, `01.30`. Drives handler selection in `MessageHelper`.
-- **Schema version** — XML attribute on the document. Independent of the process version.
+- **Process version** — e.g. `EC_REQ_ONL` 03.00 on ebUtilities.
+- **Schema set version** — e.g. `EC_REQ_ONL_02.40`; since the EDA change of 2026-10-05 it differs from the process version.
 
-A given process can have multiple supported versions in parallel. scalaxb-generated code is namespaced per (protocol, version) to keep them isolated.
+For outbound requests the backend config `eda-process-versions.<MESSAGE_CODE>` selects the label (the schema set version); the backend stamps it onto `messageCodeVersion`, eda-xp picks the builder in `getVersion()` and refuses a label without its own case. Inbound documents are dispatched by their XML namespace (scalaxb type), not by a version label. scalaxb-generated code is namespaced per (schema, version) to keep them isolated.
 
-The ebUtilities schema versions currently dispatched in eda-xp are:
+The ebUtilities schema versions with scalaxb bindings in eda-xp are:
 
 | Schema | Versions |
 |--------|----------|
@@ -103,50 +108,59 @@ The ebUtilities schema versions currently dispatched in eda-xp are:
 | CMRevoke | 01p00, 01p10 |
 | CMRequest | 01p10, 01p20, 01p21, 01p30 |
 | CPNotification | 01p13 |
-| ECMPList | 01p00, 01p10 |
-| ConsumptionRecord | 01p30, 01p40, 01p41 |
-| GCRequest | 01p00 |
+| CPRequest / CPDocument | 01p12 |
+| ECMPList | 01p00, 01p10, 01p20 |
+| ConsumptionRecord | 01p30, 01p31, 01p40, 01p41 |
+| GCRequest / GCRequestAP | 01p00 |
 | Ponton KEP envelope | v320 |
 
-(There is no ConsumptionRecord 01p20 or 01p31 wired into the dispatcher, even where an XSD file happens to be present.)
+(There is no ConsumptionRecord 01p20 in the code.)
 
 ## Gap points
 
-Six places where a new EDA version can silently drop:
+Places where a new EDA version can silently drop:
 
-1. **MessageHelper dispatcher** — no case branch for the new `messageCodeVersion` → default branch → wrong handler.
-2. **Handler `fromXML`** — scalaxb cannot parse an unknown XSD namespace → upstream catches the exception but the content is lost.
-3. **MessageStorage merge** — if the conversation-ID key does not match a prior outbound (e.g. partner-initiated message), no prior state is available.
-4. **`mergeEbmsMessage`** — no case branch for the message code → default → message goes to MQTT without enrichment.
-5. **backend subscription list** — protocol not in the hard-coded subscriptions → broker receives the publish, no consumer reads it.
-6. **backend handler `switch`** — specific message code not handled → returns without DB effect.
+1. **scalaxb binding** — the new namespace is not mapped in `build.sbt` (`scalaxbPackageNames`) → no generated type.
+2. **Inbound dispatcher** — no case in `XmlParseHandler.mapDataRecordToEbms` → the message becomes an `ERROR_MESSAGE` and goes to `protocol/error`; a document that does not parse answers 500 to Ponton.
+3. **Outbound builder** — no `getVersion()` case for the label → the request is refused (ERROR log, error to the sender).
+4. **Process mapping** — message code missing in `MessageHelper.EDAMessageCodeToProcessCode` → `protocol/error`.
+5. **Conversation merge** — conversation id does not match a stored request (e.g. partner-initiated message), or no case in `ConversationEntity.mergeEbmsMessage` → published without enrichment.
+6. **backend callback list** — protocol not registered → the backend reads the publish but drops it.
+7. **backend handler `switch`** — specific message code not handled → returns without DB effect.
 
-When adding support for a new EDA version, all six points must be verified end-to-end. The pattern is documented in the platform repo as the "XSD backfill chain check".
+When adding support for a new EDA version, all points must be verified end-to-end. The pattern is documented in the platform repo as the "XSD backfill chain check".
 
 ## Energy data pipeline
 
-Energy-data MQTT messages (`MqttEnergyMessage`) carry consumption / production values per metering point and quarter-hour slot:
+The `cr_msg` payload is the EbMsMessage JSON of a `DATEN_CRMSG`; energystore decodes it into `MqttEnergyMessage` (`model/mqtt.go`), which carries consumption / production values per metering point and slot:
 
 ```json
 {
-  "meterId": "AT003000...",
-  "data": [
-    {"meterCode": "1-1:1.9.0 G.01", "value": [0.12, 0.15, ...]},
-    {"meterCode": "1-1:2.9.0 G.02", "value": [...]},
-    {"meterCode": "1-1:2.9.0 G.03", "value": [...]}
+  "conversationId": "...",
+  "messageCode": "DATEN_CRMSG",
+  "ecId": "AT00300000000RC100...",
+  "meter": {"meteringPoint": "AT003000...", "direction": "CONSUMPTION"},
+  "energy": [
+    {
+      "start": 1730415600000,
+      "end": 1730502000000,
+      "data": [
+        {"meterCode": "1-1:1.9.0 G.01", "value": [{"from": 1730415600000, "to": 1730416500000, "method": "L1", "value": 0.12}, ...]},
+        {"meterCode": "1-1:2.9.0 G.02", "value": [...]},
+        {"meterCode": "1-1:2.9.0 G.03", "value": [...]}
+      ]
+    }
   ]
 }
 ```
 
-v1 prod subscribes to `eda/response/<tenant>/protocol/cr_msg` (and `inverter_msg`), Base64-decodes then gunzips the payload (`energyExecutor.go`), decodes the `meterCode` into a storage slot, and writes the values to Badger. v2 follows the same wire-format but writes to TimescaleDB instead — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
+Timestamps are epoch milliseconds (circe encodes `java.util.Date` as `getTime`). v1 subscribes to the configured `mqtt.energySubscriptionTopic` (`eda/response/+/protocol/cr_msg`), Base64-decodes then gunzips the payload (`mqttclient/energyExecutor.go`), decodes the `meterCode` into a storage slot, writes the values to Badger, and publishes the stored periods on `eda/response/<tenant>/protocol/cr_msg_history` for the backend. v2 follows the same wire-format but writes to TimescaleDB instead — see [services/energystore-v2](../services/energystore-v2.md). The pilot convention `eegfaktura/+/energy/+` is cleartext. See [reference/obis-codes](../reference/obis-codes.md) for the full code-to-slot mapping including T-/R-variants.
 
 Direction detection: a metering point is registered as a **producer** only if its payload contains a `P.01` or `P.01T` code. Receiving only `G.01` is ambiguous (consumers and producers both have a `G.01`) and the meter is then registered as a consumer.
 
 ## MQTT QoS and retention
 
-The bus uses QoS 0 by default. Retained messages are not used. A consumer that is down during a publish loses that message — recovery relies on the producer re-sending (eda-xp) or on the original network operator re-issuing the EDA process.
-
-Production deployments typically increase persistence + QoS for the EDA inbound topic.
+eda-xp publishes with QoS 1 (at least once) and subscribes to `eda/request` with QoS 1; the backend (`mqtt.qos`) and energystore v1 are configured with QoS 1 as well. Retained messages are not used. A consumer that is down during a publish can lose that message — recovery relies on the producer re-sending (eda-xp) or on the original network operator re-issuing the EDA process.
 
 ## MQTT protocol version
 

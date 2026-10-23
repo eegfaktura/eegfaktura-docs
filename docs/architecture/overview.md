@@ -64,7 +64,7 @@ Each backend owns a slice of domain logic and exposes a REST API consumed by the
 | **filestore** | Python | Document storage and download endpoints | [services/filestore.md](../services/filestore.md) |
 | **eda-xp** | Scala / Pekko | EDA protocol gateway (network operator communication) | [services/eda-xp.md](../services/eda-xp.md) |
 | **eda-mock** _(not in compose stack)_ | Scala | EDA stub for environments without a real network-operator link | [services/eda-mock.md](../services/eda-mock.md) |
-| **admin-backend** | Scala / Pekko | VFEEG-superuser maintenance API | [services/admin-backend.md](../services/admin-backend.md) |
+| **admin-backend** | Scala / Pekko | Superuser maintenance API (realm role `superuser`): EEG registration, Keycloak users, cross-instance maintenance | [services/admin-backend.md](../services/admin-backend.md) |
 
 ### Frontend layer — SPAs
 
@@ -103,9 +103,9 @@ Stateful dependencies, deployed alongside the application services.
 1. PONTON (external EDA adapter) POSTs an XML message to **eda-xp**.
 2. eda-xp dispatches the XML to the matching scalaxb-generated handler by message code and version.
 3. Handler enriches the message with stored conversation state from prior outbound requests.
-4. eda-xp publishes the result to **mosquitto** under `eda/<tenant>/protocol/<process_lower>`.
+4. eda-xp publishes the result to **mosquitto** under `eda/response/<receiver>/protocol/<process>` (`<receiver>` = the community's RC/CC/GC number, lower-cased).
 5. **backend** subscribes to the relevant protocols and updates state in PostgreSQL.
-6. For energy-data responses (`ENERGY_FILE_RESPONSE`), **energystore** consumes a separate MQTT topic and persists the time-series.
+6. For energy data (`cr_msg`), **energystore** subscribes to `eda/response/+/protocol/cr_msg`, persists the time-series and publishes `cr_msg_history`, which the backend writes to the process history.
 
 See [Messaging](messaging.md) for the full inbound pipeline.
 
