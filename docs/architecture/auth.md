@@ -116,7 +116,7 @@ How `/readyz` behaves:
 
 **Exposure:**
 
-- The public ingress blocks `/healthz` and `/readyz` of every service with 403 (`/api/…`, `/energystore/…`, `/filestore/…`, `/admin/…`; [eegfaktura-gitops#159](https://github.com/vfeeg-development/eegfaktura-gitops/pull/159)). The kubelet calls the pods directly and does not need the ingress.
+- The public ingress blocks `/healthz` and `/readyz` of backend, energystore, filestore and admin-backend with 403 (`/api/…`, `/energystore/…`, `/filestore/…`, `/admin/…`; [eegfaktura-gitops#159](https://github.com/vfeeg-development/eegfaktura-gitops/pull/159)). The kubelet calls the pods directly and does not need the ingress.
 - eda-xp has no ingress. Its port 6090 is reachable from outside through NodePort 32369, which Ponton uses for inbound messages, so the probe paths can be reached there too. Every route on that port is unauthenticated anyway, because Ponton inbound carries no token.
 
 !!! note
