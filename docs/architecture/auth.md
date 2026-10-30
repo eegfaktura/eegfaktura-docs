@@ -89,6 +89,39 @@ Practical consequence:
 
 In practice, separate users for customer-side and admin-side concerns keep the audience requirements clean.
 
+## Unauthenticated probe endpoints
+
+Every endpoint requires a valid bearer token, with one documented exception: the Kubernetes probe endpoints. Each service serves them on its main HTTP port, outside the auth middleware and tenant checks.
+
+| Path | Purpose | Checks | Answer |
+|------|---------|--------|--------|
+| `GET /healthz` | liveness | nothing (no database, MQTT or Keycloak), so a database outage never causes a restart loop | `200 ok` |
+| `GET /readyz` | readiness | the service's store (see the table below) | `200 ok`, otherwise `503 unavailable` |
+
+The bodies are only `ok` or `unavailable` (text/plain). They never contain error text, versions, host names or IDs. The reason for a failed check is logged at warn level.
+
+| Service | Container port | `/readyz` checks |
+|---------|----------------|------------------|
+| **backend** (Go) | 8080 | Postgres `SELECT 1` |
+| **energystore** (Go) | 8080 | a temp file can be written to and removed from the Badger persistence path (no tenant database is opened) |
+| **filestore** (Python) | 5000 (Service port 8080) | Postgres `SELECT 1` |
+| **admin-backend** (Scala / Pekko) | 8085 (Service port 8080) | Postgres `SELECT 1` |
+| **eda-xp** (Scala / Pekko) | 6090 | Postgres `SELECT 1` (MQTT is not checked) |
+
+How `/readyz` behaves:
+
+- The Postgres check uses a connection of its own, not the application pool, with driver timeouts of 2 s. A busy pool therefore does not make a pod NotReady, and anonymous callers cannot use up the pool.
+- Only one check runs at a time. Concurrent calls, and calls within about 1 s of a check, share its result, so callers cannot multiply the database load.
+- If Postgres refuses the check with SQLSTATE `53300` (`too_many_connections`), the service counts as **ready**. The application pool still holds its connections, and a saturated shared Postgres must not take every service out of its Service at once. The service logs a rate-limited warning.
+
+**Exposure:**
+
+- The public ingress blocks `/healthz` and `/readyz` of backend, energystore, filestore and admin-backend with 403 (`/api/…`, `/energystore/…`, `/filestore/…`, `/admin/…`; [eegfaktura-gitops#159](https://github.com/vfeeg-development/eegfaktura-gitops/pull/159)). The kubelet calls the pods directly and does not need the ingress.
+- eda-xp has no ingress. Its port 6090 is reachable from outside through NodePort 32369, which Ponton uses for inbound messages, so the probe paths can be reached there too. Every route on that port is unauthenticated anyway, because Ponton inbound carries no token.
+
+!!! note
+    eda-xp gets a startup and a liveness probe, but **no readiness probe** for now. It runs with one replica, and a NotReady pod drops out of both of its Services: Ponton inbound (6090) and gRPC (9093, used by backend, energystore and admin-backend). Ponton would get a refused connection instead of an HTTP error. A readiness probe follows once it is confirmed that Ponton redelivers after a refused connection.
+
 ## Machine-to-machine access (HTTP Basic / `ProtectApi`)
 
 Alongside the RS256 bearer path above, two Go services expose a second middleware, `ProtectApi`, for non-interactive / server-to-server callers. Instead of validating a bearer JWT, `ProtectApi` reads an `Authorization: Basic base64(username:password)` header and performs the password exchange against Keycloak server-side (`AuthenticateUserWithPassword`, OIDC `grant_type=password`). It then applies the same tenant check on the resulting claims, so the caller never handles a JWT directly.
