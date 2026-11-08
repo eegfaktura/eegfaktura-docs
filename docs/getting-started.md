@@ -79,7 +79,7 @@ one you are changing and match its existing patterns.
 | `eegfaktura-eda-xp` | Scala (Pekko) | `sbt test` |
 | `eegfaktura-admin-backend` | Scala (Pekko) | `sbt test` |
 | `eegfaktura-web` | React 18 + Ionic 7 + Vite | `pnpm run test.unit` (Vitest) — **pnpm only** (version in `packageManager`), never `npm install` |
-| `eegfaktura-admin` | React (CRA) | `CI=true npm test` |
+| `eegfaktura-admin` | React + MUI + Vite | `npx vitest run` (Vitest) |
 
 The table is the short version. The authoritative commands are in each repo's
 `.github/workflows/pr-checks.yml`, which runs on every pull request (unit and

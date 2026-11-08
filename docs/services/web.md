@@ -21,7 +21,7 @@ Two role categories meet here:
 | `EEG_USER` | own participant data, own energy reports, own documents |
 | `EEG_ADMIN` | EEG-wide data: all members, all metering points, billing actions |
 
-The SPA reads the groups from the `access_groups` claim (`/EEG_ADMIN`, `/EEG_USER`, `/EEG_OWNER`). A user with the realm role `superuser` passes the tenant checks of backend, energystore, billing and filestore and gets **all** EEGs in the community dropdown (`GET /api/eeg/user/get-user`); every other user gets the EEGs in their `tenant` claim.
+The SPA reads the groups from the `access_groups` claim (`/EEG_ADMIN`, `/EEG_USER`, `/EEG_OWNER`). A user with the realm role `superuser` passes the tenant checks of backend, energystore, billing and filestore and gets **all** EEGs in the community picker (`GET /api/eeg/user/get-user`); every other user gets the EEGs in their `tenant` claim.
 
 ## UI structure
 
@@ -29,14 +29,14 @@ Left navigation:
 
 | Item | Purpose |
 |------|---------|
-| **Messages** (`/page/notifications`) | notifications from the backend (`GET /api/eeg/notifications/{start}`), e.g. EDA process outcomes and import reports; reloaded on every visit and on community switch |
+| **Messages** (`/page/notifications`) | notifications from the backend (`GET /api/eeg/notifications/{start}`), e.g. EDA process outcomes and import reports; reloaded on every visit and on community switch; shown only to `EEG_ADMIN` |
 | **Dashboard** (`/page/dashboard`) | energy balance + finances for the current billing period |
-| **`<EEG name>`** (`/page/eeg`) | EEG master data and settings |
+| **`<EEG name>`** (`/page/eeg`) | EEG master data and settings; for `EEG_ADMIN` also the change of the settlement interval (since 1.20.0) and the link to the member mail texts (`/page/mailtemplates`) |
 | **Mitglieder** (`/page/participants`, default route) | member list + detail view |
-| **Tarife** (`/page/rates`) | member fees, consumer and producer tariffs |
+| **Tarife** (`/page/rates`) | member fees, consumer and producer tariffs; hidden for P2P and EVA communities, which are not billed (since 1.20.0) |
 | **Prozesse** (`/page/processes`) | EDA processes; shown only to `EEG_ADMIN` and only for online (EDA-connected) EEGs |
 
-The "Auswahl Gemeinschaft" dropdown in the user popover lets a multi-tenant user switch between EEGs (the `tenant` claim is an array). The selected tenant is kept in `localStorage` (`tenant`).
+The user popover shows the current community; with more than one, its entry "Gemeinschaft wechseln" opens the picker "Auswahl Gemeinschaft" with a search over number and name (since 1.22.0/1.22.1), so a multi-tenant user can switch between EEGs (the `tenant` claim is an array). The selected tenant is kept in `localStorage` (`tenant`).
 
 ## Dashboard semantics
 
@@ -47,9 +47,9 @@ The dashboard uses a two-color encoding consistently across charts and bars:
 
 Tile cards:
 
-- "Übersicht EEG":
+- "Übersicht EEG" — today's state over all members, not the selected period (since 1.22.0):
     - "Mitglieder" — active / inactive (plus "in Anmeldung", if any), counted from the current state of each member's metering points: active = at least one active metering point; inactive = all left, archived, rejected or moved to another member
-    - "Zählpunkte" — count split into "Abnehmer" (consumer) / "Einspeiser" (producer); the "inaktive" figure is a hard-coded `0`
+    - "Zählpunkte" — count split into "Abnehmer" (consumer) / "Einspeiser" (producer); "inaktive" counts the metering points that have left and are neither active nor being registered at any member (since 1.19.0)
     - "Tarife" — number of metering points per tariff
 - "Übersicht Stromproduktion und Verteilung" — "Produziert", "Verteilt", "EVU", each with the previous period for comparison
 - "Energiemengen" — "Eingekauft" / "Verkauft"
@@ -104,10 +104,11 @@ The trap: where an EEG's tenant differs from its rcNumber (e.g. GEA tenants `GCx
 ## Build and image
 
 - Source: `eegfaktura-web`
-- Stack (resolved versions from `pnpm-lock.yaml`): React 18.3 (`^18.2.0`), `@ionic/react` + `@ionic/core` 7.x, Vite 6 with `@vitejs/plugin-react` 4.7 and `@vitejs/plugin-legacy` 6.1, TypeScript 5.6, React Router 5.3.4, Redux Toolkit 2, `oidc-client-ts` ^3.0.0 + `react-oidc-context` ^3.0.0, recharts 2.x (charts), i18next, react-hook-form, xlsx, xmlbuilder2. Tests: vitest 3 + Testing Library (jsdom). Build-time i18n via `vite-plugin-i18next-loader` (`locales/`).
+- Stack (resolved versions from `pnpm-lock.yaml`): React 18.3 (`^18.2.0`), `@ionic/react` + `@ionic/core` 7.x, Vite 6 with `@vitejs/plugin-react` 4.7 and `@vitejs/plugin-legacy` 6.1, TypeScript 5.6, React Router 5.3.4, Redux Toolkit 2, `oidc-client-ts` ^3.0.0 + `react-oidc-context` ^3.0.0, recharts 2.x (charts), i18next, react-hook-form, xlsx (SheetJS 0.20.3 from the SheetJS CDN, since 1.19.0), xmlbuilder2. Tests: vitest 4 + Testing Library (jsdom). Build-time i18n via `vite-plugin-i18next-loader` (`locales/`).
 - Package manager: **pnpm only**, version pinned in `package.json` (`packageManager: pnpm@9.12.1`); CI installs with `--frozen-lockfile`. Node 20.18.0 (`.nvmrc`, used by CI via `setup-node`).
 - Build: `pnpm run build` = `tsc && vite build`, produces a static `dist/`. Since 1.8.0 the release image is built this way, so a type error stops the release.
-- Runtime image: `caddy:2.8.4` serving the static bundle on port **8080** from `/var/www/html/vfeeg-web/`, running as the non-root user `app` (UID/GID 1000). The Dockerfile only copies the prebuilt `dist/`; the SPA is built on the CI runner.
+- Runtime image: `caddy:2.11.7` serving the static bundle on port **8080** from `/var/www/html/vfeeg-web/`, running as the non-root user `app` (UID/GID 1000). The Dockerfile only copies the prebuilt `dist/`; the SPA is built on the CI runner.
+- Optional Dynatrace Real User Monitoring (since 1.17.0): with the container variable `DYNATRACE_RUM_URL` set to the https URL of the Dynatrace JavaScript tag, Caddy renders the tag into `index.html`; without it no tag is emitted.
 - Tag scheme (docker/metadata-action): `latest` on the default branch, branch/PR refs, semver tags, and `sha-<short>`.
 - **Build Node version**: keep Node 20. A Node 22 build produced a vendor chunk that crashed at boot with `Object.defineProperty called on non-object` inside the `@oozcitak/dom` init graph (xmlbuilder2 dependency). The deeper root cause has not been isolated.
 

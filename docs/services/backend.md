@@ -6,12 +6,12 @@ The central Go service. Owns the master-data domain (participants, metering poin
 
 | | |
 |---|---|
-| Language | Go 1.26 (`go 1.26.0` in `go.mod`, toolchain 1.26.9) |
+| Language | Go 1.26 (`go 1.26.0` in `go.mod`, toolchain 1.26.10) |
 | Framework | `net/http` + gorilla/mux v1.8.1; GraphQL via gqlgen v0.17.90 at `/query` |
-| Runtime | `golang:1.26.9` container (not distroless) |
+| Runtime | built on `golang:1.26.10`, runs on `debian:trixie-20261027-slim` (since 1.16.0) |
 | State | PostgreSQL, schema `base` |
 | Bus | MQTT subscriber (eda-xp publishes) and publisher (`eda/request`), eclipse/paho.mqtt.golang v1.5.1 |
-| Auth | JWT verify via coreos/go-oidc v3.18.0 (RS256) |
+| Auth | JWT verify via coreos/go-oidc v3.18.0 (RS256 only), claims via golang-jwt v5 |
 | Internal API | gRPC server (default port 9092) |
 
 ## Responsibilities
@@ -20,7 +20,8 @@ The central Go service. Owns the master-data domain (participants, metering poin
 - EDA inbound dispatch: subscribes to MQTT topics for the protocols it cares about and updates state accordingly
 - Process-history append: every EDA message the backend receives over MQTT (including the echo of its own requests) is logged to `base.processhistory`; UI actions are not
 - Member-self lookups: matches the JWT `email` claim (case-insensitive) against the participant's e-mail
-- Member mails via eda-xp's gRPC `SendMailService`: activation, metering point active, metering point no longer part of the community (`zp-inactive-mail-template`), metering-point list (Excel attachment)
+- Member mails via eda-xp's gRPC `SendMailService`: consent request (`consent-request`), metering point active (`zp-active`), metering point no longer part of the community (`zp-inactive`), metering-point list (Excel attachment). The texts of the three member mails are the community's saved text (`base.mail_template`, edited by EEG admins under `/eeg/mailtemplates`, since 1.8.0) or the built-in default; mails from the EDA handlers go out through a background worker (since 1.14.0)
+- Settlement interval change: `POST /eeg/settlementinterval` applies the rule of the change (since 1.16.0) and records it in `base.settlement_interval_change`
 - Energy-data request summary: a background check (every 5 minutes) writes one summary notification per multi-meter energy-data request (process `ENERGY_REQUEST`)
 
 ## REST API
@@ -33,12 +34,14 @@ Representative endpoints:
 
 | Path | Method | Auth | Purpose |
 |------|--------|------|---------|
-| `/eeg` | GET / POST | user or admin / admin | read or update the EEG record |
+| `/eeg` | GET / POST | user or admin / admin | read or update the EEG record (`settlementInterval`, `area` and `allocationMode` are not changed here) |
+| `/eeg/settlementinterval` | POST | admin | change the settlement interval (with `dryRun`; needs billing's `settlementState` as `billingState`); 409 when the rule blocks the change |
+| `/eeg/mailtemplates/{key}` | GET / PUT / DELETE | admin | member mail texts (plus `files`, `preview`, `test`) |
 | `/participant` | GET | admin (all) or user (self) | list members or member-self lookup |
 | `/participant/{id}` | PUT | admin | update a member |
 | `/meteringpoint/changepartitionfactor` | POST | admin | bulk request: sends one `ANFORDERUNG_CPF` (`EC_PRTFACT_CHANGE`) per grid operator; 404 if the EEG is not online |
 | `/process/history` | GET | admin | paginated process history (`ps` = page size; negative → 400) |
-| `/query` | POST | token + tenant header (`GQLProtect`) | GraphQL endpoint; the admin group is not enforced yet — operations with a non-admin token are logged (`gql-admin-check: non-admin token`) |
+| `/query` | POST | token + tenant header (`GQLProtect`) | GraphQL endpoint; the mutation `updateEegModel` requires the admin group (since 1.16.0) |
 | `/master/updatepartfact`, `/master/masterdata` | POST / GET | Basic auth (`ProtectApi`), `/EEG_ADMIN` group, `X-Tenant` header | external API |
 
 !!! note
@@ -52,10 +55,10 @@ The JWT is verified with coreos/go-oidc (RS256, issuer-side validation against t
 |------------|--------|
 | `Protect(handler)` | requires the `/EEG_ADMIN` group, otherwise 401 |
 | `ConditionProtect(adminHandler, userHandler)` | calls `adminHandler` for `/EEG_ADMIN`, `userHandler` for `/EEG_USER`, otherwise 401 |
-| `GQLProtect(handler)` | `/query`: token + tenant header; non-admin tokens are only marked for the log |
+| `GQLProtect(handler)` | `/query`: token + tenant header; marks non-admin tokens, which `updateEegModel` refuses |
 | `ProtectApi(handler)` | `/master/*`: Basic auth, exchanged for a token via password grant against the `api` client in `keycloak.json`; requires `/EEG_ADMIN` and the `X-Tenant` header in the `tenant` claim |
 
-A missing or malformed bearer token gives 403, a token that fails verification 401. The `azp` claim is mapped to an `Authorized` field. `PlatformClaims` embeds golang-jwt v3 `StandardClaims`, whose `Audience` field is a `string`: a token whose `aud` is a JSON array fails claim parsing (401).
+A missing or malformed bearer token gives 403, a token that fails verification 401. The `azp` claim is mapped to an `Authorized` field. `PlatformClaims` embeds golang-jwt v5 `RegisteredClaims` (since 1.14.0), so `aud` may be a string or a JSON array.
 
 ## EDA subscriptions
 
@@ -68,12 +71,12 @@ When a community has moved to another zone, eda-xp forwards its inbound Ponton m
 | `CR_MSG_HISTORY` (Go constant `model.CR_MSG`) | `protocolCrMsgHandler` | published by the energystore on `eda/response/<tenant>/protocol/cr_msg_history` after it imported a `CR_MSG`; writes one process-history entry (meter, from, to) per energy block. The raw `CR_MSG` itself is dropped in the backend's MQTT route — the energystore consumes it directly |
 | `CR_REQ_PT` | `protocolCrReqPtHandler` | energy-data request (`ANFORDERUNG_PT`) answers `ANTWORT_PT` / `ABLEHNUNG_PT`; only writes history / notifications, does **not** change metering-point status |
 | `EC_REQ_ONL` | `protocolEcReqOnlHandler` | Zählpunkt online-activation lifecycle |
-| `EC_REQ_OFF` | `protocolEcReqOnlHandler` | offline registration lifecycle (same handler as `EC_REQ_ONL`) |
+| `EC_REQ_OFF` | `protocolEcReqOnlHandler` | offline registration lifecycle (same handler as `EC_REQ_ONL`); the backend no longer sends `ANFORDERUNG_ECOF` (since 1.14.0), `activationMode: "OFFLINE"` for an online EEG gets 400 (code 1205) |
 | `CM_REV_IMP` | `protocolCmRevImpHandler` | revocation, import direction |
 | `CM_REV_CUS` | `protocolCmRevImpHandler` | revocation by customer |
-| `CM_REV_SP` | `protocolCmRevImpHandler` | revocation by service provider |
+| `CM_REV_SP` | `protocolCmRevImpHandler` | revocation by service provider: the own `AUFHEBUNG_CCMS` leaves the status; `ANTWORT_CCMS` 176 and `ABLEHNUNG_CCMS` 177 / 180 set an `ACTIVE` metering point `INACTIVE` (since 1.17.0) |
 | `EC_PRTFACT_CHANGE` | `protocolEcPrtChangeHandler` | grid-operator response to a participation-factor change; three variants: `ANTWORT_CPF` (accepted, appends to `base.metering_partition_factor`), `ABLEHNUNG_CPF` (rejected, notification with response code), `ANFORDERUNG_CPF` (outbound echo, history only) |
-| `EC_PODLIST` | `protocolEcPodListHandler` | per-grid-operator metering-point list response; exported to Excel and mailed to the EEG's e-mail address |
+| `EC_PODLIST` | `protocolEcPodListHandler` | per-grid-operator metering-point list response (`SENDEN_ECP`); updates the metering points of every tenant of the community, since 1.16.0 also `base.eeg.ec_zone_level` (Nahebereich) and TechCode/FuelCode of the metering points; exported to Excel and mailed to the EEG's e-mail address |
 
 Handlers pattern-match on `MessageCode` (not version). Depending on the message they append to `base.processhistory`, create notifications, and — for the lifecycle handlers — update `base.meteringpoint.status` / `process_state`. Not every handler touches metering-point status (e.g. `CR_REQ_PT` only writes history and notifications).
 
@@ -104,9 +107,9 @@ The gRPC server (`services/grpcServer.go`, port `grpc-provider.port`) registers 
 
 | Schema | Tables (key) | Operation |
 |--------|--------------|-----------|
-| `base` | `eeg`, `participant`, `contactdetail`, `address`, `bankaccount`, `meteringpoint`, `metering_partition_factor`, `tariff`, `processhistory`, `notification`, `gridoperators`; views `activeMeteringPartition`, `activeTariff`, `billing_masterdata` (read by billing) | read/write |
+| `base` | `eeg`, `participant`, `contactdetail`, `address`, `bankaccount`, `meteringpoint`, `metering_partition_factor`, `tariff`, `processhistory`, `notification`, `gridoperators`, `mail_template`, `mail_template_file`, `settlement_interval_change`; views `activeMeteringPartition`, `activeTariff`, `billing_masterdata` (read by billing) | read/write |
 
-The Go layer talks to PostgreSQL via the jackc/pgx v5 driver together with jmoiron/sqlx, and SQL is built with doug-martin/goqu. Schema migrations are embedded from `migrations/` and run automatically on startup via golang-migrate v4 (`db.MigrateDB()` in `database/database.go`, called from `main()` in `server.go`; migration table in schema `base`). The target schema lives in `schema.sql` / `schema.hcl`; migration files are generated with Atlas (`atlas.hcl`, golang-migrate format, `migrations/atlas.sum`) and the three must be kept in sync. Latest migration: `20260711120000_zvt_time_tariff` (time-of-use tariff columns on `base.tariff`, 1.6.0).
+The Go layer talks to PostgreSQL via the jackc/pgx v5 driver together with jmoiron/sqlx, and SQL is built with doug-martin/goqu. Schema migrations are embedded from `migrations/` and run automatically on startup via golang-migrate v4 (`db.MigrateDB()` in `database/database.go`, called from `main()` in `server.go`; migration table in schema `base`). The target schema lives in `schema.sql` / `schema.hcl`; migration files are generated with Atlas (`atlas.hcl`, golang-migrate format, `migrations/atlas.sum`) and the three must be kept in sync. Every lock wait of the migrations is bounded to 60 s (since 1.17.0). Latest migration: `20261106100000_ec_zone_level_tech_fuel_code` (`base.eeg.ec_zone_level`, `base.meteringpoint.tech_code` / `fuel_code`, 1.16.0).
 
 Caveats from operational experience:
 
@@ -128,11 +131,13 @@ Configuration is loaded with spf13/viper from `config.yaml` in the `-configPath`
 | `VFEEG_BACKEND_PORT` | HTTP listen port (default 9080) |
 | `grpc-provider.port` | gRPC listen port (default 9092) |
 | `services.mail-server` | gRPC endpoint of `eda-xp`'s `SendMailService` (member notifications; see [architecture/email](../architecture/email.md)) — **not** a direct SMTP host |
-| `file-content.templates` | directory with global and per-tenant mail templates on the data volume (overrides the templates embedded in the binary) |
+| `file-content.templates` | former directory of hand-made mail templates on the data volume; since 1.9.0 they are ignored, the backend only logs at start which template files there are no longer used |
 | `eda-process-versions.<MessageCode>` | EDA schema version stamped on outbound messages per message code (e.g. `ANFORDERUNG_CPF`) |
 | `grid-operator-alias` | map of grid operator numbers to the number they are reachable under (read once at start) |
 | `KEYCLOAK_CONFIG` | path to the Keycloak client JSON (clients `app` and `api`; default `./keycloak.json`) |
-| `LOG_LEVEL` | logrus level, e.g. `info` / `debug` (default `debug`) |
+| `LOG_LEVEL` | log level, e.g. `info` / `debug` (default `info`) |
+| `LOG_FORMAT` | `json` (default, one JSON object per line with ECS field names, since 1.14.0) or `text` |
+| `DEPLOYMENT_ENVIRONMENT` | environment name on every log line (since 1.16.0; left out when unset) |
 
 ## Secrets
 
@@ -146,7 +151,7 @@ The MQTT client connects without credentials, so there is no MQTT secret. `keycl
 
 - Go module path: `at.ourproject/vfeeg-backend`
 - Binary: the Docker build produces `vfeeg-backend` (image `CMD ["vfeeg-backend","-configPath","/etc/backend/"]`); the local `Makefile` builds it as `master-backend`
-- Build: multi-stage Docker (`golang:1.26.9` in both stages, final image not distroless); the build stage runs `make protoc` and `go generate ./...` (gqlgen, go-jsonschema) before compiling. The container `EXPOSE`s 8080, while the app listens on the configurable `port` (default 9080 in the repo `config.yaml`) plus gRPC on 9092; it runs as UID 1000 with `TZ=Europe/Berlin`
+- Build: multi-stage Docker (build stage `golang:1.26.10`, runtime `debian:trixie-20261027-slim`); the build stage runs `make generate` (`protoc`, then `go generate` in `model`) before compiling. The container `EXPOSE`s 8080, while the app listens on the configurable `port` (default 9080 in the repo `config.yaml`) plus gRPC on 9092; it runs as UID 1000 with `TZ=Europe/Berlin`
 - Tag scheme: `sha-<short sha>` for every build, plus semver tags (`v1.6.0`, `1.6`, `1`) from `v*` git tags and `latest` on the default branch
 
 ## Local development
@@ -157,7 +162,7 @@ For pure code work, many tests use `sqlmock`; the database tests start PostgreSQ
 
 ## Authorization gaps
 
-The backend's auth-Z coverage is incomplete. All REST routes except `GET /eeg` and `GET /participant` (`ConditionProtect`) require the admin group, and single-participant operations check the participant's tenant (1.1.1); finer owner checks do not exist. When adding routes, default to `Protect` (admin group) unless there is a deliberate reason to use `ConditionProtect`, and document the reason. Known gaps: `GET /master/test` is mounted without any auth (it only logs), `/query` does not enforce the admin group yet, and the gRPC server has no authentication (cluster-internal only).
+The backend's auth-Z coverage is incomplete. All REST routes except `GET /eeg` and `GET /participant` (`ConditionProtect`) require the admin group, and single-participant operations check the participant's tenant (1.1.1); finer owner checks do not exist. When adding routes, default to `Protect` (admin group) unless there is a deliberate reason to use `ConditionProtect`, and document the reason. Known gap: the gRPC server has no authentication (cluster-internal only).
 
 ## Related
 

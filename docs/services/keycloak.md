@@ -6,7 +6,7 @@ OIDC identity provider for the entire platform. One realm, three declared client
 
 | | |
 |---|---|
-| Keycloak | 26.7.4 (`quay.io/keycloak/keycloak:26.7.4`, image 1.0.3) |
+| Keycloak | 26.7.5 (`quay.io/keycloak/keycloak:26.7.5`, image 1.0.4; the local stack's image v1.0.3 is still on 26.7.4) |
 | Image (local stack) | custom `ghcr.io/eegfaktura/eegfaktura-keycloak:v1.0.3` |
 | Realm | `EEGFaktura`, declared in `realm/EEGFaktura.yaml` (keycloak-config-cli) |
 | Login theme | `eegfaktura-ui` (baked into the image) |
@@ -97,7 +97,7 @@ The `eegfaktura-keycloak` image no longer sets any of the v1 options (since [eeg
 
 ## Build and image
 
-Two-stage `Dockerfile`: the builder stage runs `kc.sh build` on `quay.io/keycloak/keycloak:26.7.4` with health, metrics and `KC_DB=postgres`; the final stage copies the built Keycloak plus `themes/` (the `eegfaktura-ui` login theme) and runs as `USER 1000`. `ENTRYPOINT` is `kc.sh`, `CMD` is `start`, so `args` / `command` replace only the subcommand. The realm is not baked in: it comes from `realm/EEGFaktura.yaml` (config-cli) or, in the docker-compose stack, from the realm import directory.
+Two-stage `Dockerfile`: the builder stage runs `kc.sh build` on `quay.io/keycloak/keycloak:26.7.5` with health, metrics and `KC_DB=postgres`; the final stage copies the built Keycloak plus `themes/` (the `eegfaktura-ui` login theme) and runs as `USER 1000`. `ENTRYPOINT` is `kc.sh`, `CMD` is `start`, so `args` / `command` replace only the subcommand. The realm is not baked in: it comes from `realm/EEGFaktura.yaml` (config-cli) or, in the docker-compose stack, from the realm import directory.
 
 Images: CI pushes `ghcr.io/vfeeg-development/eegfaktura-keycloak` (used by the deployments); docker-compose uses the public-tier `ghcr.io/eegfaktura/eegfaktura-keycloak`.
 

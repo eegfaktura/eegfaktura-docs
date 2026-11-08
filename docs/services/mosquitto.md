@@ -29,7 +29,7 @@ The local docker-compose stack uses a custom image, `ghcr.io/eegfaktura/eegfaktu
 
 `<tenant>` is the community's market-participant id (RC/CC/GC number) as eda-xp puts it into the topic — the receiver of an inbound message, the sender of a request answer — lower-cased; energystore and backend upper-case it again. It is not `base.eeg.tenant`, which can differ (GEA). `<process_lower>` is the EDA process code lowercased (`cm_rev_sp`, `ec_req_onl`, …; `cr_msg_03.03` is normalised to `cr_msg`).
 
-The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). All other topics are cleartext JSON. energystore v1 has a configured `…/protocol/inverter_msg` topic, but nothing publishes to it and v1 does not subscribe to it. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
+The `cr_msg` topic is the one carrying actual energy values per metering point, hence the gzip + Base64 encoding (it is **not** encrypted). All other topics are cleartext JSON. The GitOps ConfigMap of energystore v1 still sets a `…/protocol/inverter_msg` topic, but nothing publishes to it and the v1 code does not read that key. See [eda-xp.md#cr_msg-payload-encoding](eda-xp.md#cr_msg-payload-encoding) for the wire format.
 
 Subscriber-side details are documented per service: see [backend](backend.md) and [energystore](energystore.md).
 

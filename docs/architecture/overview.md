@@ -47,6 +47,7 @@ flowchart LR
 
   BE -.->|gRPC mail| EX
   ES -.->|gRPC master data| BE
+  ES -->|member check| BE
   AB -.->|gRPC register| BE
   AB -.->|gRPC Ponton| EX
   AB -->|admin API| KC
@@ -117,11 +118,11 @@ See [Messaging](messaging.md) for the full inbound pipeline.
 
 ### Admin runs the period billing
 
-The billing period is configurable per EEG — monthly, quarterly, biannual, or yearly (see `base.eeg."settlementInterval"`: `MONTHLY` / `QUARTER` / `BIANNUAL` / `ANNUAL`). The same flow runs once per chosen period.
+The billing period is configurable per EEG — monthly, quarterly, biannual, or yearly (see `base.eeg."settlementInterval"`: `MONTHLY` / `QUARTER` / `BIANNUAL` / `ANNUAL`); EEG admins change it in web under the rule of `POST /eeg/settlementinterval` (since backend 1.16.0). The same flow runs once per chosen period. Communities of type `P2P` and `EVA` are not billed (billing answers 400).
 
 1. **web** (EEG admin) calls **billing** to create a preview.
 2. The request carries the network-operator-allocated values: **web** reads them from the **energystore** report and sends them as `allocations` (for time-variable tariffs per window bucket `BASE`/`T1`/`T2`). billing has no outbound HTTP client; it reads master data and tariffs from the backend view `base.billing_masterdata` in the shared database.
-3. The run is **asynchronous**: `POST /api/billing` answers `202 Accepted` with a `billingRunId`, the UI polls `GET /api/billingRuns/{id}`. A start while a run for the same period is still `RUNNING`, or after the final run, gets `409`.
+3. The run is **asynchronous**: `POST /api/billing` answers `202 Accepted` with a `billingRunId`, the UI polls `GET /api/billingRuns/{id}`. A start while a run for the same period is still `RUNNING`, after the final run, or a final run whose months overlap a final run with documents gets `409`.
 4. billing multiplies each metering point's `allocationKWh` by the tariff price. The web derives `allocationKWh` from the energystore report: consumers `utilization` (G.03), producers `production − allocation` (G.01 − P.01; where the operator delivers T variants, energystore stores those). For time-variable tariffs each window bucket is priced separately.
 5. The generated documents (PDFs) are stored by billing itself in `billingj.file_data`; billing does not use filestore.
 6. Admin triggers the **final billing** action; the run becomes immutable.
@@ -136,14 +137,14 @@ Most day-to-day admin work in the customer SPA triggers an EDA process against t
 |-----------|-------------|--------|
 | Add member + Zählpunkt | (no EDA) | `base.participant` row with status `PENDING`; `base.meteringpoint` row with `process_state` `NEW` (`status` `INIT`) |
 | Confirm member (or add a Zählpunkt to an active member) in an online EEG | `EC_REQ_ONL` (`ANFORDERUNG_ECON`) | participant `ACTIVE`; metering point `NEW` → `INIT` (request sent) → `PENDING` (operator answer, code 99) → `APPROVED` (customer consent, code 175) → `ACTIVE` (`ABSCHLUSS_ECON`); `REJECTED` / `INVALID` on rejection or abort |
-| Same, metering point with activation mode `OFFLINE` | `EC_REQ_OFF` (`ANFORDERUNG_ECOF`) | offline variant of the registration (`*_ECOF` messages), same state handling as `EC_REQ_ONL` |
+| Same, metering point with activation mode `OFFLINE` | — | no longer sent since backend 1.14.0 (the grid operators no longer support `ANFORDERUNG_ECOF`): for an online EEG the request gets 400 (code 1205); web sends only `ONLINE` since 1.19.0. Inbound `*_ECOF` messages are still handled like `EC_REQ_ONL` |
 | Confirm member in an EEG that is not online | (no EDA) | participant and metering points set to `ACTIVE` directly |
-| Revoke (deactivate) Zählpunkt | `CM_REV_SP` (backend sends `AUFHEBUNG_CCMS`) | `status` / `process_state` → `INACTIVE`, `inactivesince` = consent end |
+| Revoke (deactivate) Zählpunkt | `CM_REV_SP` (backend sends `AUFHEBUNG_CCMS`) | the request leaves the status unchanged; the operator's answer `ANTWORT_CCMS` 176 or `ABLEHNUNG_CCMS` 177 / 180 sets an `ACTIVE` metering point to `INACTIVE`, `inactivesince` = consent end of the request (since backend 1.17.0) |
 | Change participation factor | `EC_PRTFACT_CHANGE` | the operator accepts it only between 09:00 and 17:00 Austrian time and applies it from the next day (outside it rejects with „Prozessdatum falsch“); web warns outside the window but still allows sending |
 | Request energy data | `CR_REQ_PT` | operator delivers per-period values (G.01 / G.02 / G.03 etc.) as `DATEN_CRMSG` on the `cr_msg` topic |
 | Request metering-point list | `EC_PODLIST` | the operator sends the list (`SENDEN_ECP`); the backend mails it as XLSX to the EEG's e-mail address and updates the community's metering points from it |
 
-Revocations also arrive operator- or customer-initiated (`CM_REV_IMP` with `AUFHEBUNG_CCMI`, `CM_REV_CUS` with `AUFHEBUNG_CCMC`; `CM_REV_SP` carries both the backend's own request and the answers). `AUFHEBUNG_CCMI` / `AUFHEBUNG_CCMC`, the own `AUFHEBUNG_CCMS` and an `ANTWORT_CCMS` with code 176 set the metering point's `status` and `process_state` to `INACTIVE` (`database/meteringPointDao.go`); an `ABLEHNUNG_CCMS` leaves it active. A `REVOKED` process state is defined in `model/participant.go` but not set by the revocation flow.
+Revocations also arrive operator- or customer-initiated (`CM_REV_IMP` with `AUFHEBUNG_CCMI`, `CM_REV_CUS` with `AUFHEBUNG_CCMC`; `CM_REV_SP` carries both the backend's own request and the answers). `AUFHEBUNG_CCMI` / `AUFHEBUNG_CCMC` (only for metering points of the communities of the receiving RC number, since 1.17.0), an `ANTWORT_CCMS` with code 176 and an `ABLEHNUNG_CCMS` with code 177 or 180 set the metering point's `status` and `process_state` to `INACTIVE`; the own `AUFHEBUNG_CCMS` and an `ABLEHNUNG_CCMS` with another code leave it unchanged (since backend 1.17.0). A `REVOKED` process state is defined in `model/participant.go` but not set by the revocation flow.
 
 See [services/backend](../services/backend.md#eda-subscriptions) for the subscription-and-handler mapping.
 

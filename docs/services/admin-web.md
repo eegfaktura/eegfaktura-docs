@@ -7,9 +7,9 @@ VFEEG maintenance UI. Cross-tenant administrative tool for the operating team. T
 | | |
 |---|---|
 | Language | TypeScript 4.9.5 (strict) |
-| Framework | React 18.2.0, built with Create React App (react-scripts 5.0.1) |
+| Framework | React 18.2.0, built with Vite 6 (since 1.2.3; before Create React App) |
 | UI | Material-UI (MUI) 5.14.0 + @mui/x-data-grid 6.20.4 + @mui/x-date-pickers + @emotion |
-| Server | Caddy 2.8.4 (port 8080; dev server on 3000) |
+| Server | Caddy 2.11.7 (port 8080; dev server on 3000) |
 | Auth | OIDC, realm role `superuser` required |
 | Backends consumed | admin-backend (primary), energystore (raw-data delete only) |
 
@@ -33,11 +33,11 @@ Only users with the `superuser` realm role can use the portal. The SPA decodes t
 
 Three steps:
 
-1. **Allgemein** — name, description, rcNumber, tenant, communityId, settlement interval, legal form, allocation model, area
+1. **Allgemein** — name, description, rcNumber, tenant, communityId, settlement interval, legal form, allocation model (only "Dynamisch" for new communities, since 1.3.0), area (also `P2P` and `EVA`, since 1.3.0)
 2. **Betreiber** — first/last name, contact (street, city, zip, phone), email, IBAN, account owner, and the list **Logins** (first name, last name, e-mail per row)
 3. **Kommunikation** — grid operator (from `/vfeeg/operators`), grid name, login (username + password), online flag, PONTON config (`NONE` = "ignorieren / bereits konfiguriert" or `KEP`; selectable only for online EEGs)
 
-An XLSX upload button sits right of the step-1 heading (`CommonEegProperties`); the file is parsed client-side and pre-fills the form. No server-side upload. Column headers are matched ignoring case, spaces, line breaks and hyphens. From the Excel member list the Logins list is filled with the main account ("Hauptaccount", or the contact if that is empty) and the further accounts 1–3 that have an e-mail; it can be edited.
+An XLSX upload button sits right of the step-1 heading (`CommonEegProperties`); the file is parsed client-side and pre-fills the form. No server-side upload. Column headers are matched ignoring case, spaces, line breaks and hyphens; an unknown type or a static allocation is an error of the row (since 1.3.0). The file is read with SheetJS 0.20.3 from the SheetJS CDN (since 1.2.3). From the Excel member list the Logins list is filled with the main account ("Hauptaccount", or the contact if that is empty) and the further accounts 1–3 that have an e-mail; it can be edited.
 
 Exactly the listed logins get an account (see [admin-backend — Logins per EEG](admin-backend.md#logins-per-eeg)); with an empty list the operator (contact) gets the login, as before. After the registration the message names the result per login; a message with a failed login stays until it is closed.
 
@@ -59,7 +59,7 @@ Three-column layout:
 |--------|-------|--------|
 | sidebar | navigation | — |
 | middle | EEG selector — card list with search | `GET /vfeeg/eeg` |
-| right top | EEG header strip: name / mode / online / settlement (pencil) / contact / area | inline edit → `POST /admin/master/update/eeg` |
+| right top | EEG header strip: name / mode / online / settlement (read only since 1.3.0, it changes only in web) / contact / area | inline edit → `POST /admin/master/update/eeg` |
 | right middle | Members data grid: first/last name, status, business role, actions | `GET /vfeeg/participants?tenant=<id>` |
 | right bottom | Member detail: metering points — id, direction, state, process status (pencil), active / inactive (pencils) | inline edit → `POST /admin/master/update` |
 
@@ -75,7 +75,7 @@ The business-role editor is commented out in the code; admin-backend's `updateCl
 
 ## Raw-data delete (`/rawdata-delete`)
 
-Deletes (zeroes) the raw energy data of a single metering point within a time range in energystore v1. Two steps: a dry run shows the affected timesteps and summed kWh, then a double confirmation (retype the metering point) executes. Calls energystore directly, `POST ${REACT_APP_ENERGY_SERVER_URL}/eeg/v2/{ecId}/rawdata/delete` (default `/energystore`, same-origin), with the operator's bearer token and a `tenant` header; energystore requires the `superuser` role on that endpoint. The community field is the long `AT…` community id, not the RC number.
+Deletes (zeroes) the raw energy data of a single metering point within a time range in energystore v1. Two steps: a dry run shows the affected timesteps and summed kWh, then a double confirmation (retype the metering point) executes. Calls energystore directly, `POST ${REACT_APP_ENERGY_SERVER_URL}/eeg/v2/{ecId}/rawdata/delete` (read through `import.meta.env`) (default `/energystore`, same-origin), with the operator's bearer token and a `tenant` header; energystore requires the `superuser` role on that endpoint. The community field is the long `AT…` community id, not the RC number.
 
 ## Backend endpoints used
 
@@ -106,12 +106,12 @@ All routes except the raw-data delete go to admin-backend.
 ## Build and image
 
 - Source: `eegfaktura-admin` (historically `eeg-registration-frontend` → `vfeeg-admin-web` → `eegfaktura-admin-web`; the public AGPL fork formerly at that name was archived in 2026-06 — see the archived `gemeinstrom/eegfaktura-admin-web-archived-2026-06` tombstone repo)
-- Stack: React 18.2.0 + TypeScript 4.9.5 (strict), Create React App (react-scripts 5.0.1). UI is MUI 5.14.0 + @mui/x-data-grid 6.20.4 + @mui/x-date-pickers (moment adapter, `de` locale) + @emotion. Forms: react-hook-form 7.45.1 + yup. State: Redux Toolkit 1.9.5 + zustand 5.0.3. Routing: react-router-dom 6.30. Also lodash, moment, xlsx (Excel upload), @maskito, sass.
+- Stack: React 18.2.0 + TypeScript 4.9.5 (strict), Vite 6 + Vitest 4 (since 1.2.3, replacing Create React App / react-scripts 5.0.1). UI is MUI 5.14.0 + @mui/x-data-grid 6.20.4 + @mui/x-date-pickers (moment adapter, `de` locale) + @emotion. Forms: react-hook-form 7.45.1. State: Redux Toolkit 1.9.5 + zustand 5.0.3. Routing: react-router-dom 6.30. Also moment, xlsx (SheetJS 0.20.3 from the SheetJS CDN, Excel upload), @maskito, sass.
 - Package manager: **npm**. CI (`pr-checks.yml`, `rolling-release.yml`) runs `npm ci` on Node 20.18.0.
-- Build: `npm run build` (CRA → `build/`) → static bundle → Caddy image, served on port **8080**. Since 1.2.0 CI no longer sets `TSC_COMPILE_ON_ERROR`: type errors fail the build, and the release workflow checks that `build/index.html` exists. Source files were restored from prod-image sourcemaps for 1.0.0 and are committed.
-- Image: `ghcr.io/vfeeg-development/eeg-registration-frontend` (legacy name kept), base `caddy:2.8.4`, runs as user `app` (UID 1000).
-- Runtime config: fetched at startup from `/config/keycloak-config.json` (Caddy renders it from a template with `KEYCLOAK_REALM`, `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID`). Defaults: client_id `at.ourproject.vfeeg.admin`, realm `EEGFaktura`; OIDC via oidc-client-ts 2.2.4 + react-oidc-context 2.2.2 (keycloak-js 22 also present), user store = sessionStorage. Backend endpoints come from `REACT_APP_ADMIN_SERVER_URL` (default `/admin`) and `REACT_APP_ENERGY_SERVER_URL` (default `/energystore`).
-- Dev proxy (`setupProxy.js`): `/admin` → 8085 (admin-backend), `/api` → 9080 (backend), `/cash` → 9090 (billing).
+- Build: `npm run build` (`tsc` for app, tests and Vite config, then `vite build` → `build/`, with source maps) → static bundle → Caddy image, served on port **8080**. Type errors fail the build, and the release workflow checks that `build/index.html` exists. Source files were restored from prod-image sourcemaps for 1.0.0 and are committed.
+- Image: `ghcr.io/vfeeg-development/eeg-registration-frontend` (legacy name kept), base `caddy:2.11.7`, runs as user `app` (UID 1000).
+- Runtime config: fetched at startup from `/config/keycloak-config.json` (Caddy renders it from a template with `KEYCLOAK_REALM`, `KEYCLOAK_URL`, `KEYCLOAK_CLIENT_ID`). Defaults: client_id `at.ourproject.vfeeg.admin`, realm `EEGFaktura`; OIDC via oidc-client-ts 2.2.4 + react-oidc-context 2.2.2, user store = sessionStorage. Backend endpoints come from `REACT_APP_ADMIN_SERVER_URL` (default `/admin`) and `REACT_APP_ENERGY_SERVER_URL` (default `/energystore`); Vite keeps the `REACT_APP_` prefix (`envPrefix`).
+- Dev server (`vite.config.ts`, port 3000, strict): proxies `/admin` → 8085 (admin-backend) and `/energystore` → 9081 (energystore).
 
 ## Caddy security headers
 

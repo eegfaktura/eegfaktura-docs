@@ -12,17 +12,19 @@ How member- and admin-facing notification e-mails (for example metering-point
 
 ```mermaid
 flowchart LR
-    BE[eegfaktura-backend<br/>renders HTML template]
+    BE[eegfaktura-backend<br/>renders mail text]
     XP[eda-xp<br/>SendMailService gRPC :9093]
     MB[SMTP server<br/>eda-xp's own config<br/>epmsmail.admin.javaxmail]
     INBOX[(recipient inbox)]
     BE -->|gRPC :9093| XP -->|SMTP, STARTTLS + auth| MB -->|deliver| INBOX
 ```
 
-1. **Render** — the backend fills an HTML template with the EEG / participant / metering-point
-   data. Templates are looked up under the directory in the config key `file-content.templates`
-   (in the cluster `/opt/storage/public`): `<dir>/<tenant>/templates/`, then the global
-   `<dir>/templates/`, then the defaults embedded in the binary (`public/templates`).
+1. **Render** — the backend fills the mail text with the EEG / participant / metering-point
+   data. The text is the community's saved text (`base.mail_template`, edited by EEG admins in web
+   under „E-Mail-Texte“, since backend 1.8.0) or the built-in default embedded in the binary
+   (`public/templates`). Hand-made templates on the data volume (`file-content.templates`) are
+   ignored since backend 1.9.0. Mails from the EDA handlers are queued and sent one at a time by
+   a background worker (since 1.14.0); each send waits up to 30 s for the mail server.
 2. **gRPC hand-off** — the backend has **no direct SMTP path**. It calls the `SendMailService`
    (proto package `at.energydash`) at the config key `services.mail-server` (backend
    `config.yaml`; the env override keeps the hyphen, `VFEEG_BACKEND_SERVICES_MAIL-SERVER`, because
@@ -40,8 +42,8 @@ flowchart LR
 
 | Sender | Path | Examples |
 |---|---|---|
-| **eegfaktura-backend** | renders a Go `html/template` → gRPC `SendMailService` → eda-xp SMTP | metering-point **activation** ("Aktivierung im Serviceportal"), **completion** ("Dein Zählpunkt ist aktiv"), **inactive** ("Dein Zählpunkt ist nicht mehr Teil der Energiegemeinschaft"); ZP list Excel to the EEG office address (`SendMailWithAttachment`) |
-| billing | renders a **FreeMarker** template → its **own** `JavaMailSender`/SMTP (`MAIL_*` env) → in-cluster relay (`eegfaktura-mailbrake` in the GitOps manifests, `eegfaktura-postfix` in docker-compose) | billing documents (PDF attached) |
+| **eegfaktura-backend** | saved text or built-in default → gRPC `SendMailService` → eda-xp SMTP | metering-point **activation** ("Aktivierung im Serviceportal"), **completion** ("Dein Zählpunkt ist aktiv"), **inactive** ("Dein Zählpunkt ist nicht mehr Teil der Energiegemeinschaft"); ZP list Excel to the EEG office address (`SendMailWithAttachment`) |
+| billing | saved text (`billing-document`) or built-in default → its **own** `JavaMailSender`/SMTP (`MAIL_*` env) → in-cluster relay (`eegfaktura-mailbrake` in the GitOps manifests, `eegfaktura-postfix` in docker-compose) | billing documents (PDF attached) |
 | energystore | gRPC `ExcelAdminService.SendExcel` on eda-xp's port 9093 — **currently broken**: eda-xp does not implement `ExcelAdminService` | energy Excel report to the requesting user (`POST /eeg/{ecid}/excel/export/{year}/{month}`) |
 | keycloak | its own SMTP (configured on the instance; not in `realm/EEGFaktura.yaml`) | password reset, e-mail verification, the "set your password" mail that admin-backend triggers for new accounts (`executeActionsEmail(UPDATE_PASSWORD)`) |
 
@@ -52,11 +54,13 @@ directly.
     eda-xp's gRPC server registers only `SendMailService` and `RegisterPontonService`; it does
     not implement `ExcelAdminService`, so energystore's `SendExcel` call fails.
 
-Note the template engines differ per sender: the backend uses Go
-`html/template` (see [Templates & conventions](#templates-conventions) below), while billing
-renders with **FreeMarker** (`BillingEmailDefaultTemplate.ftl`, `MAIL_NO_REPLY_TO` sender,
-`Cc:` the issuer; sent as multipart/alternative with a plain-text part and
-`Auto-Submitted: auto-generated`). The two do not share a template store.
+backend (`consent-request`, `zp-active`, `zp-inactive`) and billing (`billing-document`, since
+billing 1.2.0) keep the editable texts in their own tables (`base.mail_template`,
+`billingj.billing_mail_template`) with the same schema and API (`/eeg/mailtemplates`,
+`/api/mailtemplates`) and the same policy file `mail-html-policy.json` (see
+[Templates & conventions](#templates-conventions) below). billing sends with the `MAIL_NO_REPLY_TO`
+sender and `Cc:` the issuer, as multipart/alternative with a plain-text part and
+`Auto-Submitted: auto-generated`.
 
 ## Recipient address handling
 
@@ -88,15 +92,15 @@ is empty after trimming means "no e-mail" — not an error, no send. Canonical s
 
 ## Templates & conventions
 
-- Per-tenant templates under `<file-content.templates>/<tenant>/templates/`; if the requested
-  **template config file** (`*.toml`, e.g. `activation-mail-template.toml`) is missing there (not
-  just the whole directory), the backend falls back to the global `<file-content.templates>/templates/`,
-  then to the defaults embedded in the binary.
+- A saved text is never run through a template engine: it is sanitised server-side against
+  `mail-html-policy.json` (identical copy in backend and billing), and placeholders are replaced
+  by escaped values only.
+- Limits for the member mails of the backend: at most 3 images, no PDF attachment; links only to
+  `https:` / `mailto:`. billing attaches the document PDF and allows no further PDF.
+- Every member mail of the backend ends with a fixed, non-editable footer
+  („versandt durch EEG Faktura, ein Service des VFEEG“, since 1.10.0); billing appends a fixed
+  footer too (since 1.3.0).
 - Member-facing mails use the informal **"du"** salutation.
-- Shared signature / footer: EEG description → address → phone / e-mail / website (each behind a
-  `Valid` guard) → "versandt durch" → logo capped at `max-height: 90px`.
-- `null.String` template fields must be rendered via `.String` with a `Valid` guard — printing
-  the value directly emits the raw struct (`{{value true}}`).
 
 ## Related
 

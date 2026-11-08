@@ -60,7 +60,7 @@ Notes:
 
 - Group names appear with a leading slash (`/EEG_ADMIN`). backend and web compare the slash form exactly; billing strips the slash and maps each group to `ROLE_<group>`.
 - The tenant claim key is `tenant` (lowercase, singular) and carries a JSON string array. The `at.ourproject.vfeeg.app` mapper has `multivalued=true`, `aggregate.attrs=true`, `jsonType.label=JSON`. Tenant comparison is case-insensitive in every service (backend/energystore upper-case both sides, billing `equalsIgnoreCase`, filestore upper-cases the GEA stem tenant, see below).
-- The `at.ourproject.vfeeg.app` client deliberately has **no** audience mapper. backend's claim struct embeds golang-jwt v3 `StandardClaims`, whose `aud` is a plain string: a token whose `aud` is an array fails to parse there (401). energystore uses golang-jwt v4 `RegisteredClaims` and accepts both forms.
+- The `at.ourproject.vfeeg.app` client has **no** audience mapper. backend (golang-jwt v5) and energystore (golang-jwt v4) embed `RegisteredClaims` in their claim structs and accept `aud` both as a string and as an array; backend accepts the array form since 1.14.0.
 
 ## Required mappers on the customer client
 
@@ -73,7 +73,7 @@ Notes:
 
 `at.ourproject.vfeeg.api` has its own tenant mapper (`tenantIds`) that is **single-valued** (`multivalued=false`, `jsonType.label=String`) and no group mapper. `at.ourproject.vfeeg.admin` has only the audience mapper.
 
-Consequence for `ProtectApi` (see [below](#machine-to-machine-access-http-basic-protectapi)): with the realm as declared in `EEGFaktura.yaml`, the ID token from `…api` carries `tenant` as a plain JSON string and no `access_groups`. backend and energystore parse `tenant` into a string array, so the claim parse fails and the request gets 403; backend would also miss `/EEG_ADMIN`. Whether the running realms differ from the YAML is not visible in the repositories.
+Consequence for `ProtectApi` (see [below](#machine-to-machine-access-http-basic-protectapi)): with the realm as declared in `EEGFaktura.yaml`, the ID token from `…api` carries `tenant` as a plain JSON string and no `access_groups`. backend parses `tenant` into a string array, so the claim parse fails and the request gets 403; it would also miss `/EEG_ADMIN`. energystore (since 1.9.0) also reads a single string value. Whether the running realms differ from the YAML is not visible in the repositories.
 
 ## Per-service auth check
 
@@ -81,10 +81,10 @@ Each backend enforces auth independently.
 
 | Service | Mechanism | iss / aud / exp | Critical input |
 |---------|-----------|-----------------|----------------|
-| **backend** (Go) | coreos/go-oidc v3 verifier, keys via OIDC discovery/JWKS; Keycloak settings from the `KEYCLOAK_CONFIG` file (default `./keycloak.json`, entries `app` and `api`). `Protect` / `ConditionProtect` / `GQLProtect` middleware | `iss` must match the provider URL; `aud` not checked (`SkipClientIDCheck: true`); `exp` required (go-oidc rejects a missing/expired `exp`); asymmetric algorithms only (go-oidc rejects `none`/HMAC) | tenant from header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless the token has realm role `superuser` (mismatch: 403 on REST, 401 on `/query`); `access_groups` decides admin (`/EEG_ADMIN`) vs. user (`/EEG_USER`). On `/query` (GraphQL) a token without `EEG_ADMIN` is currently only logged (`gql-admin-check`), not rejected. `azp` is read only for that log line |
-| **billing** (Java / Spring) | Auth0 java-jwt, `Algorithm.RSA256` with an X.509 cert read from `JWT_PUBLICKEYFILE` (converted to an `RSAPublicKey`); `anyRequest().hasRole(EEG_ADMIN)` (`/` and `/swagger-ui` permitted) | no `iss`/`aud` check; `exp` checked when present (60 s leeway), not required | requires `EEG_ADMIN` in `access_groups`; `Tenant` HTTP header must be in the JWT `tenant` array (case-insensitive) unless realm role `superuser`; resources additionally compare path/record tenant with the header (`TenantContext.validateTenant`). Profile `dev` disables security |
-| **energystore** (Go) | coreos/go-oidc v3 verifier via `KEYCLOAK_CONFIG` (same file format as backend), `ProtectApp` / `GQLProtect` middleware. The golang-jwt v4 `JWTMiddleware` that reads `jwt.pubKeyFile` (`ENERGYSTORE_JWT_PUBKEYFILE`) is not wired to any route | as backend (`SkipClientIDCheck: true`) | header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless realm role `superuser`; GraphQL resolvers compare their `tenant` argument with the checked header (`tenantctx`) |
-| **filestore** (Python) | PyJWT, `algorithms=["RS256"]` (HS256 / `none` → 401); public key file from the settings field `JWT_PUBLIC_KEY_FILE`, filled from env `JWT_KEY_FILE` (the GitOps manifests set this one) or directly from env `JWT_PUBLIC_KEY_FILE` (takes precedence), loaded once at start | `aud` must equal `JWT_AUDIENCE` (default `account`); `exp` required (`options={"require": ["exp"]}`); `iss` not checked | requires Keycloak's **public key** in PEM form (not the X.509 cert); `assert_tenant` in each resolver after loading the resource, `superuser` exempt |
+| **backend** (Go) | coreos/go-oidc v3 verifier, keys via OIDC discovery/JWKS, `SupportedSigningAlgs` RS256 only; Keycloak settings from the `KEYCLOAK_CONFIG` file (default `./keycloak.json`, entries `app` and `api`). `Protect` / `ConditionProtect` / `GQLProtect` middleware | `iss` must match the provider URL; `aud` not checked (`SkipClientIDCheck: true`); `exp` required (go-oidc rejects a missing/expired `exp`); only RS256 accepted | tenant from header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless the token has realm role `superuser` (mismatch: 403 on REST, 401 on `/query`); `access_groups` decides admin (`/EEG_ADMIN`) vs. user (`/EEG_USER`). On `/query` (GraphQL) the mutation `updateEegModel` requires `EEG_ADMIN` (since 1.16.0) |
+| **billing** (Java / Spring) | Auth0 java-jwt, `Algorithm.RSA256` with an X.509 cert read from `JWT_PUBLICKEYFILE` (converted to an `RSAPublicKey`); `anyRequest().hasRole(EEG_ADMIN)` (`/` and `/swagger-ui` permitted) | no `iss`/`aud` check; `exp` checked when present (60 s leeway), not required | requires `EEG_ADMIN` in `access_groups`; `Tenant` HTTP header must be in the JWT `tenant` array (case-insensitive) unless realm role `superuser`; resources additionally compare path/record tenant with the header (`TenantContext.validateTenant`). The JWT chain applies in every Spring profile (since 1.7.0) |
+| **energystore** (Go) | coreos/go-oidc v3 verifier via `KEYCLOAK_CONFIG` (same file format as backend, RS256 only), `ProtectApp` / `GQLProtect` middleware | as backend (`SkipClientIDCheck: true`) | header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless realm role `superuser`; GraphQL resolvers compare their `tenant` argument with the checked header (`tenantctx`) |
+| **filestore** (Python) | PyJWT, `algorithms=["RS256"]` (HS256 / `none` → 401); key file from the settings field `JWT_PUBLIC_KEY_FILE`, filled from env `JWT_KEY_FILE` (the GitOps manifests set this one) or directly from env `JWT_PUBLIC_KEY_FILE` (takes precedence), loaded once at start | `aud` must equal `JWT_AUDIENCE` (default `account`); `exp` required (`options={"require": ["exp"]}`); `iss` not checked | the key file holds Keycloak's RSA public key or its X.509 certificate in PEM form (since 1.1.0); anything else stops the start; `assert_tenant` in each resolver after loading the resource, `superuser` exempt |
 | **admin-backend** (Scala / Pekko) | Nimbus JOSE+JWT, RS256 key selector over Keycloak JWKS (`RemoteJWKSet`, URL from `KEYCLOAK_URL`/`KEYCLOAK_REALM` or `KEYCLOAK_AUTHENTICATOR_JWKS_URL`) | `iss` must equal `<KEYCLOAK_URL>/realms/<KEYCLOAK_REALM>` (case-insensitive); `aud` must contain `KEYCLOAK_AUDIENCE` (set to the admin SPA client id, `at.ourproject.vfeeg.admin`); `exp` required | realm role `superuser` on all routes (`/eeg`, `/vfeeg`, `/admin`), otherwise 403 `{"error":"superuser role required"}` |
 | **eda-xp** (Scala / Pekko) | no JWT validation | — | talks to the other services via MQTT; its HTTP routes (`/pontonxp/...`, `/admin/upload`) and gRPC admin server carry no bearer check |
 
@@ -94,7 +94,7 @@ The Go services (backend, energystore) switch the audience check off (`SkipClien
 
 Practical consequence:
 
-- A token from `at.ourproject.vfeeg.admin` carries an `aud` array once more than one audience is present; backend cannot parse such a token (see [JWT structure](#jwt-structure)). Do not add an audience mapper to `at.ourproject.vfeeg.app`.
+- A token from `at.ourproject.vfeeg.admin` carries an `aud` array once more than one audience is present; backend (since 1.14.0) and energystore parse it (see [JWT structure](#jwt-structure)).
 
 In practice, separate users for customer-side and admin-side concerns keep the audience requirements clean.
 
@@ -144,7 +144,7 @@ Notes:
 
 - The Basic credentials are an ordinary Keycloak username/password; the service exchanges them for a token internally. backend additionally requires `/EEG_ADMIN` in `access_groups`; energystore checks only the tenant. Neither applies the `superuser` exemption on this path.
 - The exchange uses `at.ourproject.vfeeg.api`, the realm client with Direct Access Grants enabled. The customer SPA client `…app` has it switched off (`directAccessGrantsEnabled: false`); for the admin client `…admin` the realm file does not set it, so it depends on the Keycloak default for imported clients.
-- energystore decodes the Basic value with URL-safe base64 (`base64.URLEncoding`), backend with standard base64.
+- Both decode the Basic value with standard base64 (RFC 7617); energystore since 1.9.0.
 - Routes guarded by `Protect` (bearer-only) do **not** accept Basic. In particular the participant endpoints — `POST /participant`, `PUT /participant/{id}`, `POST /participant/{id}/confirm`, `PUT /participant/v2/{id}`, `DELETE /participant/v2/{id}` (`api/participantController.go`) — require a bearer JWT with `EEG_ADMIN`; a Basic request returns HTTP 403. There is currently no `ProtectApi` equivalent for participant writes.
 
 ## Member-data binding
@@ -187,9 +187,9 @@ The minimum steps to add a working user, by role (admin-backend does steps 1–2
 
 The billing service verifies JWTs (Auth0 java-jwt) using an X.509 certificate read from the file named by `JWT_PUBLICKEYFILE` (default `/billing/zertifikat-pub.pem`), which it converts to an `RSAPublicKey` — it does **not** fetch JWKS at runtime. The cert must be Keycloak's current RS256 signing cert. The file is read on every token validation, so a replaced file takes effect without a restart.
 
-## Filestore caveat
+## Filestore key file
 
-Filestore uses PyJWT, which does **not** accept an X.509 certificate as the verification key — it requires the raw public key. Extract with `openssl x509 -pubkey -noout`. The key file is supplied via env `JWT_KEY_FILE` (default of the settings field `JWT_PUBLIC_KEY_FILE`; an env `JWT_PUBLIC_KEY_FILE` overrides it) and read once at start. PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).
+PyJWT itself does **not** accept an X.509 certificate as the verification key. Since 1.1.0 filestore reads either a PEM public key or a PEM certificate from the key file and extracts the RSA public key from a certificate; a file that is neither, or no RSA key, stops the start. The key file is supplied via env `JWT_KEY_FILE` (default of the settings field `JWT_PUBLIC_KEY_FILE`; an env `JWT_PUBLIC_KEY_FILE` overrides it) and read once at start. PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).
 
 ## Related
 

@@ -29,14 +29,14 @@ admin-web is the authoritative client.
 
 ## Endpoints
 
-All routes sit under three prefixes (`vfeeg`, `eeg`, `admin`) and require the `superuser` realm role (see [Auth](#auth)).
+All routes sit under three prefixes (`vfeeg`, `eeg`, `admin`) and require the `superuser` realm role (see [Auth](#auth)); only the probe endpoints `GET /healthz` and `GET /readyz` (since 1.2.0) are unauthenticated.
 
 | Route | Purpose |
 |---|---|
 | `GET /vfeeg/eeg` | all EEGs (Slick read) |
 | `GET /vfeeg/participants?tenant=<id>` | members of an EEG with their metering points (Slick read) |
 | `GET /vfeeg/operators` | grid operators (Slick read) |
-| `POST /eeg/register` | register a new EEG: gRPC to backend, Ponton registration at eda-xp for online EEGs, Keycloak logins |
+| `POST /eeg/register` | register a new EEG: gRPC to backend, Ponton registration at eda-xp for online EEGs, Keycloak logins. `grid.area` also accepts `P2P` and `EVA` (since 1.3.0); `grid.allocation` `STATIC` is refused with 400 (new communities only with dynamic allocation, since 1.3.0); an existing EEG is refused (since 1.2.0) |
 | `POST /eeg/ponton` | set the Ponton config of an existing EEG; HTTP is always 200, the outcome is `status` / `message` in the body |
 | `POST /eeg/account?tenant=<id>` | add a login to an existing EEG |
 | `GET /eeg/accounts?tenant=<id>` | list the logins of an EEG (name, e-mail, username, enabled, password not yet set) |
@@ -61,7 +61,7 @@ The Ponton transport `MAIL` is rejected since 1.0.5 (`/eeg/register` answers 400
 
 ## Auth
 
-Verifies JWTs with Nimbus JOSE+JWT (9.31). The Keycloak JWKS is fetched at runtime via `RemoteJWKSet` (which caches keys and handles rotation). By default the JWKS URL is derived from the issuer; `KEYCLOAK_AUTHENTICATOR_JWKS_URL` (`keycloakAuthenticator.jwksUrl`) sets a separate fetch URL (e.g. cluster-internal) while the expected issuer stays the public URL.
+Verifies JWTs with Nimbus JOSE+JWT (9.37.4). The Keycloak JWKS is fetched at runtime via `RemoteJWKSet` (which caches keys and handles rotation). By default the JWKS URL is derived from the issuer; `KEYCLOAK_AUTHENTICATOR_JWKS_URL` (`keycloakAuthenticator.jwksUrl`) sets a separate fetch URL (e.g. cluster-internal) while the expected issuer stays the public URL.
 
 Checks in `KeycloakJwtAuthenticator`:
 
@@ -88,8 +88,11 @@ The HOCON file uses `${?ENV}` overrides, so individual values can be supplied vi
 
 | Env var | Overrides |
 |---|---|
-| `LOG_LEVEL` | Pekko log level (default `INFO`) |
-| `LOG_LEVEL_APP` | level of the application loggers `at.ourproject.*` (default `INFO`; read by `logback.xml`) |
+| `LOG_LEVEL` | root log level, also for Pekko (default `info`; read by `logback.xml`) |
+| `LOG_LEVEL_APP` | level of the application loggers `at.ourproject.*` (default: `LOG_LEVEL`) |
+| `LOG_LEVEL_HTTP_CLIENT` | level of the Keycloak admin client's HTTP stack (default `warn`, not raised by `LOG_LEVEL`) |
+| `LOG_FORMAT` | `json` (default, one ECS JSON object per line, since 1.2.0) or `text` |
+| `DEPLOYMENT_ENVIRONMENT` | environment name on every log line (since 1.3.0; left out when unset) |
 | `KEYCLOAK_URL` | Keycloak base URL |
 | `KEYCLOAK_REALM` | Keycloak realm |
 | `KEYCLOAK_ADMIN_CLI_AUDIENCE` | admin-cli client id |

@@ -29,7 +29,7 @@ See [services/mosquitto](../services/mosquitto.md) for configuration and deliver
 The participant slot is the message's market-participant id — for inbound messages the `receiver` (the community's RC/CC/GC number), for request answers the `sender` — lowercased by eda-xp; the backend and energystore uppercase it again. It is not the `ecId` (community id), which travels in the payload. `<process_lower>` is the EDA process code lowercased: `cm_rev_sp`, `ec_req_onl`, `cm_rev_imp`, etc.
 
 !!! note "Legacy energy topic pattern"
-    The energy topic pattern is `eda/response/+/protocol/cr_msg`. The energystore repo's `config-prod.yaml` still carries the legacy form `eda/response/energy/+`; eda-xp never publishes there (its `energyTopic` config key is unused) — check the deployed config when reconciling subscriptions.
+    The energy topic pattern is `eda/response/+/protocol/cr_msg` (energystore's `config.yaml` and the GitOps ConfigMap). eda-xp never publishes on the legacy form `eda/response/energy/+` (its `energyTopic` config key is unused) — check the deployed config when reconciling subscriptions.
 
 !!! warning "CR_MSG is the only compressed topic"
     `cr_msg` is the topic carrying actual energy values per metering point — and the only topic with a non-cleartext wire format. The payload is **gzip-compressed then Base64-encoded; it is not encrypted** (eda-xp contains no encryption code). All other topics are cleartext JSON. Subscribers must Base64-decode then gunzip before the JSON parse — see [services/eda-xp#cr_msg-payload-encoding](../services/eda-xp.md#cr_msg-payload-encoding) for the wire format. The pilot convention `eegfaktura/+/energy/+` is cleartext.
@@ -77,11 +77,11 @@ The backend registers callbacks for these protocols (`eda/edaSubscription.go`, `
 | Process | Direction | Purpose |
 |---------|-----------|---------|
 | `EC_REQ_ONL` | bidirectional | "Anmeldung Teilnahme Online" — Zählpunkt activation (`ANFORDERUNG_ECON` → `ANTWORT_ECON`, `ZUSTIMMUNG_ECON`, `ABSCHLUSS_ECON`, …) |
-| `EC_REQ_OFF` | bidirectional | Offline registration (`ANFORDERUNG_ECOF` → `…_ECOF`) |
+| `EC_REQ_OFF` | inbound | Offline registration (`…_ECOF` answers). The backend no longer sends `ANFORDERUNG_ECOF` since 1.14.0: the grid operators no longer support it |
 | `EC_PRTFACT_CHANGE` | bidirectional | Participation-factor change. Outbound `ANFORDERUNG_CPF`, inbound `ANTWORT_CPF` (accepted) or `ABLEHNUNG_CPF` (rejected). Grid operator only accepts requests between 09:00 and 17:00 Austrian time, effective the next day. |
 | `EC_PODLIST` | bidirectional | Metering-point list: outbound `ANFORDERUNG_ECP`, inbound `SENDEN_ECP` / `ABLEHNUNG_ECP` |
 | `CR_REQ_PT` | bidirectional | Energy-data request: outbound `ANFORDERUNG_PT`, inbound `ANTWORT_PT` / `ABLEHNUNG_PT` |
-| `CM_REV_SP` | bidirectional | Revocation by the service provider (`AUFHEBUNG_CCMS` → `ANTWORT_CCMS` / `ABLEHNUNG_CCMS`) |
+| `CM_REV_SP` | bidirectional | Revocation by the service provider (`AUFHEBUNG_CCMS` → `ANTWORT_CCMS` / `ABLEHNUNG_CCMS`); the answer decides the metering point's status (since backend 1.17.0) |
 | `CM_REV_IMP` | inbound | Revocation (`AUFHEBUNG_CCMI`) |
 | `CM_REV_CUS` | inbound | Revocation by customer (`AUFHEBUNG_CCMC`) |
 | `CR_MSG` | inbound | Energy data (`DATEN_CRMSG`) — consumed by energystore; the backend handles the derived `cr_msg_history` from energystore |

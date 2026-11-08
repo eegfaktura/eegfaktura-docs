@@ -6,8 +6,8 @@ Python service. Stores member documents (contracts uploaded through the web UI; 
 
 | | |
 |---|---|
-| Language | Python 3.13 (image base `python:3.13-slim-bookworm`) |
-| Framework | FastAPI 0.138.2 (Starlette 1.3, Pydantic v2 + `pydantic-settings`, uvicorn 0.49.0); GraphQL via Strawberry 0.320.0 |
+| Language | Python 3.13 (image base `python:3.13-slim-trixie`, since 1.2.0) |
+| Framework | FastAPI 0.138.2 (Starlette 1.3, Pydantic v2 + `pydantic-settings`, uvicorn 0.49.0); GraphQL via Strawberry 0.327.2 |
 | State | PostgreSQL schema `filestore` (SQLAlchemy 2.0.51 async + asyncpg 0.31.0, Alembic 1.18.5 migrations) + blobs on a local filesystem |
 | Auth | PyJWT 2.15.0 (RS256) |
 | Consumed by | web (contract documents of a member: list, upload, download, delete) |
@@ -43,23 +43,15 @@ Allowed upload media types are a hardcoded whitelist: `application/pdf`, `image/
 
 ## Auth
 
-Filestore verifies JWTs with PyJWT, `algorithms=["RS256"]` only (HS256 and `alg=none` get 401). `exp` is required (`options={"require": ["exp"]}`). The public key is loaded from a file at import time (the service fails fast if it is missing; the key is not baked into the image since 1.0.4). JWT decoding validates the `aud` claim against `JWT_AUDIENCE` (default `account`); `iss` is not checked.
+Filestore verifies JWTs with PyJWT, `algorithms=["RS256"]` only (HS256 and `alg=none` get 401). `exp` is required (`options={"require": ["exp"]}`). The key is loaded from a file at import time (the service fails fast if it is missing, holds no RSA key, or is neither a PEM public key nor a PEM certificate; the key is not baked into the image since 1.0.4). JWT decoding validates the `aud` claim against `JWT_AUDIENCE` (default `account`); `iss` is not checked.
 
 The tenant claim in the token is the JSON key `tenant` (singular); the Python model exposes it as `tenants: List[str]` (alias `tenant`). On single-item lookups the service loads the record, then asserts the tenant; list queries and uploads assert the requested tenant first. `assert_tenant` compares case-insensitively (both sides uppercased, after GEA stem normalisation) and raises 403 on mismatch. The realm role `superuser` (in `realm_access.roles`) skips the tenant check, mirroring the backend.
 
 Two operational caveats:
 
-### PyJWT needs the public key, not the X.509 cert
+### Public key or X.509 certificate
 
-PyJWT does not accept an X.509 certificate as the verification key. The configured key must be the raw public key (no certificate wrapper).
-
-Extract from a cert:
-
-```sh
-openssl x509 -pubkey -noout -in zertifikat-pub.pem > zertifikat-pubkey.pem
-```
-
-The resulting `BEGIN PUBLIC KEY` block is what PyJWT consumes.
+PyJWT itself does not accept an X.509 certificate as the verification key. Since 1.1.0 filestore reads either a `BEGIN PUBLIC KEY` block or a `BEGIN CERTIFICATE` block (the realm certificate other components read) from the key file and passes the RSA public key to PyJWT (`_load_public_key` in `app/auth.py`).
 
 ### Tokens need a matching `aud`
 
@@ -67,7 +59,7 @@ The resulting `BEGIN PUBLIC KEY` block is what PyJWT consumes.
 
 ## Endpoints
 
-The service exposes both a REST API under `/{HTTP_FILE_DL_ENDPOINT}` (default `/filestore`) and a GraphQL endpoint at `/graphql` (GraphiQL toggled via `GRAPHIQL_ENABLED`; multipart uploads explicitly enabled). It listens on `0.0.0.0` (hardcoded in `main.py`), port `HTTP_PORT` (default 5000). Every route requires a bearer token.
+The service exposes both a REST API under `/{HTTP_FILE_DL_ENDPOINT}` (default `/filestore`) and a GraphQL endpoint at `/graphql` (GraphiQL toggled via `GRAPHIQL_ENABLED`; multipart uploads explicitly enabled). It listens on `0.0.0.0` (hardcoded in `main.py`), port `HTTP_PORT` (default 5000). Every route requires a bearer token, except the probe endpoints `GET /healthz` and `GET /readyz` (since 1.1.0, see [Architecture / Authentication](../architecture/auth.md#unauthenticated-probe-endpoints)).
 
 REST (`app/rest/routers/filestore.py`):
 
@@ -104,22 +96,24 @@ Migrations are run by Alembic (`alembic upgrade head`) on startup in `entrypoint
 
 | Variable | Purpose |
 |----------|---------|
-| `DB_HOSTNAME`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | PG connection |
+| `DB_HOSTNAME`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD` | PG connection (read by pydantic-settings) |
 | `DB_PASSWORD_FILE` | file the entrypoint reads the DB password from (when `DB_PASSWORD` is unset) |
 | `HTTP_PROTOCOL`, `HTTP_HOSTNAME`, `HTTP_PORT` | build the default download base URI (`{protocol}://{hostname}:{port}`); `HTTP_PORT` (default 5000) is also the listen port, the bind address is always `0.0.0.0` |
 | `HTTP_FILE_DL_ENDPOINT` | REST route prefix and download path segment (default `filestore`) |
 | `HTTP_FILE_DL_BASE_URI` | download base URI returned to clients (default `{HTTP_BASE_URI}/{HTTP_FILE_DL_ENDPOINT}`) |
 | `FILESTORE_LOCAL_BASE_DIR` | directory where blobs are stored (config.py default `/vfeeg-filestore-data`; the Dockerfile sets `/eegfaktura-filestore-data` — note the inconsistency) |
 | `FILESTORE_TEMP_DIR` | temp directory for in-progress uploads (default `{FILESTORE_LOCAL_BASE_DIR}/tmp`) |
-| `JWT_KEY_FILE` | path to the PyJWT-compatible RS256 public key PEM (default `jwt_pub_key.pem`). It is the default of the settings field `JWT_PUBLIC_KEY_FILE`; pydantic-settings also reads `JWT_PUBLIC_KEY_FILE` directly, which then takes precedence |
+| `JWT_KEY_FILE` | path to the RS256 public key or certificate PEM (default `jwt_pub_key.pem`). It is the default of the settings field `JWT_PUBLIC_KEY_FILE`; pydantic-settings also reads `JWT_PUBLIC_KEY_FILE` directly, which then takes precedence |
 | `JWT_AUDIENCE` | expected `aud` claim (default `account`) |
 | `GRAPHIQL_ENABLED` | enable the GraphiQL UI (`true` only) |
-| `APP_LOG_LEVEL` | read into settings, but currently unused (the uvicorn `log_level` argument is commented out) |
+| `LOG_LEVEL` | log level (default `info`); the former `APP_LOG_LEVEL` is still read when `LOG_LEVEL` is not set |
+| `LOG_FORMAT` | `json` (set by the image) or `text` (default when run from source) |
+| `DEPLOYMENT_ENVIRONMENT` | environment name on every log line (since 1.2.0; left out when empty) |
 
 ## Build and image
 
 - Source: `eegfaktura-filestore`
-- Build: Docker (`python:3.13-slim-bookworm` base, runs as non-root `app`, UID/GID 1000); `requirements.txt` pins all dependencies including transitive ones
+- Build: multi-stage Docker (`python:3.13-slim-trixie` base, runs as non-root `app`, UID/GID 1000); `requirements.txt` pins all dependencies including transitive ones
 - CI (`pr-checks.yml`): byte-compile and import; Alembic `upgrade head` + `alembic check`, pytest (`tests/`, FastAPI TestClient against a migrated PostgreSQL; covers 401/403 cases, categories, GEA stem, superuser) and an application start; ruff lint (`F`, `E7`, `B`); a check that every requirement is pinned. `security-scan.yml` runs Gitleaks, Trivy and OSV-Scanner.
 
 ## Source lineage caveat

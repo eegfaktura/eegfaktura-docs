@@ -4,11 +4,11 @@ Domain terms used throughout the documentation.
 
 ## Domain
 
-**Abrechnungsperiode** — Billing period. Configurable per EEG (`base.eeg."settlementInterval"`): `MONTHLY`, `QUARTER`, `BIANNUAL`, or `ANNUAL`. Read-only in the customer SPA; a superuser can change it in admin-web (Portal Manager).
+**Abrechnungsperiode** — Billing period. Configurable per EEG (`base.eeg."settlementInterval"`): `MONTHLY`, `QUARTER`, `BIANNUAL`, or `ANNUAL`. EEG admins change it in the customer SPA on the EEG page (backend `POST /eeg/settlementinterval`, since backend 1.16.0 / web 1.20.0): without a final period at once, otherwise from the month after the last final period, and not while a run is calculating. admin-web only shows it (since admin 1.3.0).
 
 **Abrechnungs-Workflow** — Three-phase per-period process: preview creation, preview updates, final billing. After the final-billing action the run is immutable.
 
-**Allocation model** — How the network operator shares the community's production among the consumers (`base.eeg."allocationMode"`, read-only in the customer SPA). `DYNAMIC` weights by consumption per quarter hour; `STATIC` uses fixed shares. eegfaktura does not compute the allocation; it stores the operator's values.
+**Allocation model** — How the network operator shares the community's production among the consumers (`base.eeg."allocationMode"`, read-only in the customer SPA). `DYNAMIC` weights by consumption per quarter hour; `STATIC` uses fixed shares. New communities are registered with `DYNAMIC` only (since admin-backend 1.3.0). eegfaktura does not compute the allocation; it stores the operator's values.
 
 **Approval** — Steps of the online registration process `EC_REQ_ONL`: `ZUSTIMMUNG_ECON` (the member consented in the grid operator's portal → metering point process state `APPROVED`) and `ABSCHLUSS_ECON` (the metering point is part of the EEG → process state `ACTIVE`).
 
@@ -22,11 +22,13 @@ Domain terms used throughout the documentation.
 
 **Mitglied** — Member of an EEG. Stored as `base.participant`, with its Zählpunkte in `base.meteringpoint`. A member without an active Zählpunkt counts as inactive on the dashboard.
 
+**Beitrittsgebühr** — One-time joining fee, set on the EEG tariff (since backend 1.12.0 / billing 1.6.0). billing charges it once on the member's invoice in the first final run with energy; members already billed with energy count as paid.
+
 **Mitgliedsbeitrag** — Member fee, a tariff of type `EEG`. A fixed amount that billing adds as its own position on every billing run of the member.
 
 **Network operator** — Netzbetreiber. Operates the physical grid and the smart meters. Communicates with eegfaktura via the EDA protocol through PONTON.
 
-**Ortsgebiet** — Geographical scope / community form of the EEG (`base.eeg.area`): `LOCAL`, `REGIONAL`, `BEG` or `GEA`. Set when the EEG is registered (admin-web wizard); the customer SPA does not edit it.
+**Ortsgebiet** — Geographical scope / community form of the EEG (`base.eeg.area`): `LOCAL`, `REGIONAL`, `BEG`, `GEA`, and since backend 1.16.0 `P2P` (peer-to-peer) and `EVA` (Eigenversorgung). Set when the EEG is registered (admin-web wizard); the customer SPA shows it as „Modell“ and does not edit it. P2P and EVA communities are not billed in eegfaktura. The Nahebereich (zone level 1–7) is stored separately in `base.eeg.ec_zone_level` and taken from the grid operator's metering-point list.
 
 **PONTON** — The Ponton X/P messenger (KEP) that exchanges EDA messages with the market partners. External HTTP endpoint that `eda-xp` integrates with; not deployed in the Dev zone (see eda-mock) or the local stack.
 
@@ -39,7 +41,7 @@ Domain terms used throughout the documentation.
 **Stammdaten-XLSX-Import** — Bulk-import template (`/attachments/15` in the public docs). Brings new members and their metering points into eegfaktura in one shot, and can append metering points to existing members. **Update-by-import is not supported** — existing member data is never changed, and a metering point the member already has fails that row. See [Master Data Import](masterdata-import.md).
 
 **Tarif** — Tariff. Four types in the data model (`model/tariff.go`, `base.tariff.type`):
-- `EEG` — member fee, a fixed amount per member and billing run
+- `EEG` — member fee, a fixed amount per member and billing run; optionally with a one-time joining fee
 - `VZP` — consumer Zählpunkt tariff: ct/kWh × the kWh the web sends (report `utilization` = G.03) per billing period
 - `EZP` — producer Zählpunkt tariff: ct/kWh × (report `production − allocation` = G.01 − P.01) per billing period
 - `AKONTO` — present in the data model and the SPA's types; billing has no code for it
@@ -86,7 +88,7 @@ Domain terms used throughout the documentation.
 
 **admin-backend** — Scala/Pekko backend for the maintenance UI. Separate from the customer-side `backend`. Originally named `registration-backend`.
 
-**admin-web** — React 18 + MUI SPA (Create React App) for VFEEG operators (`eegfaktura-admin`). Cross-tenant maintenance UI.
+**admin-web** — React 18 + MUI SPA (Vite) for VFEEG operators (`eegfaktura-admin`). Cross-tenant maintenance UI.
 
 **backend** — Go service. Owns master data and EDA inbound dispatch on the consumer side.
 

@@ -10,7 +10,7 @@ Scala / Pekko service that bridges PONTON (the external EDA adapter) with the re
 | Framework | Apache Pekko 1.2.1 (HTTP 1.2.0 + typed actors + persistence, migrated from Akka 2026-06-13), Pekko Connectors MQTT 1.1.0, Pekko gRPC (sbt plugin 1.1.1) |
 | Inbound | (1) Ponton X/P (KEP) EDA adapter — SOAP envelope POSTed to `/pontonxp/message` on port 6090; (2) email IMAP polling per tenant mailbox (tenant type `MAIL`) |
 | Outbound | EDA XML in a SOAP request to the Ponton X/P endpoint (`app.kepserver.url`) for tenants of type `KEP`, or by SMTP for tenants of type `MAIL`; inbound results published to MQTT |
-| Ports | HTTP 6090 (Ponton routes `/pontonxp/*` + `/admin/upload`), gRPC 9093 |
+| Ports | HTTP 6090 (Ponton routes `/pontonxp/*` + `/admin/upload`, probes `/healthz` / `/readyz` since 1.3.0), gRPC 9093 (requests up to 16 MB, since 1.2.0) |
 | Auth | none — no JWT/bearer check on the HTTP routes or the gRPC server (reached cluster-internally only) |
 | State | PostgreSQL `eda` schema (tenant config, conversations, mail inbox/outbox) via Slick + slick-pg, Flyway migrations; outgoing message counter in a Pekko persistence LevelDB journal under `/storage/prod` |
 | XML parsing | scalaxb 1.12.0 (per-namespace package mapping) |
@@ -49,7 +49,7 @@ PONTON EDA adapter (external) ─HTTP POST SOAP envelope─→ PontonRoute /pont
 
 The email path (`mailer/Fetcher`, `TenantMailActor`) and the admin multipart upload (`/admin/upload`, `FileService.handleUpload`) feed the same `XmlParseHandler` mapping and `MqttPublish`.
 
-Answer codes to Ponton: 204 when the message was handled (also for an unknown message type, which is logged as ERROR and published to the receiver's `protocol/error` topic); 500 when a known document cannot be parsed or mapped (e.g. a new MessageCode) — Ponton keeps it and redelivers it. `/pontonxp/status` and `/pontonxp/notification` are only logged.
+Answer codes to Ponton: 204 when the message was handed to the MQTT publishing stream (also for an unknown message type, which is logged as ERROR and published to the receiver's `protocol/error` topic); 500 when a known document cannot be parsed or mapped (e.g. a new MessageCode), and since 1.4.0 also when the message cannot be handed to MQTT within 10 s (MQTT not connected, aggregator lookup or merge failed, publish buffer full) — Ponton keeps it and redelivers it. `/pontonxp/status` and `/pontonxp/notification` are only logged.
 
 See [Architecture / Messaging](../architecture/messaging.md) for the end-to-end view including the backend subscriber side, and the "gap points" where a new EDA version can silently drop.
 
@@ -108,12 +108,12 @@ When the backend triggers an EDA flow (Zählpunkt activation, energy-data reques
 | Message code | Process | Version labels accepted | Purpose |
 |--------------|---------|-------------------------|---------|
 | `ANFORDERUNG_ECON` | `EC_REQ_ONL` | 02.00, 02.10, 02.30, 02.40 | Zählpunkt activation (online registration) |
-| `ANFORDERUNG_ECOF` | `EC_REQ_OFF` | 02.00, 02.10, 02.20, 02.30 | Offline registration |
+| `ANFORDERUNG_ECOF` | `EC_REQ_OFF` | 02.00, 02.10, 02.20, 02.30 | Offline registration (the backend no longer sends it since backend 1.14.0) |
 | `ANFORDERUNG_ECP` | `EC_PODLIST` | 02.00, 02.10 | Request the community's metering-point list |
 | `ANFORDERUNG_PT` | `CR_REQ_PT` | 03.00 | Energy-data request |
 | `ANFORDERUNG_GN` | `MD_REQ_GN` | 03.12 | Master data request |
 | `AUFHEBUNG_CCMS` | `CM_REV_SP` | 01.02, 01.10, 01.30 | Revocation by the service provider |
-| `ANFORDERUNG_CPF` | `EC_PRTFACT_CHANGE` | 01.00 (ECMPList 01p10), 01.10 (ECMPList 01p20) | Change participation factor |
+| `ANFORDERUNG_CPF` | `EC_PRTFACT_CHANGE` | 01.00 (ECMPList 01p10), 01.10 (ECMPList 01p20) | Change participation factor; `ECType` from the request's `ecType` (`P2P` → `PP`, `EVA` → `SC`, only in 01.10; since 1.5.0 there is no `RC_L` default, a request without `ecType` is not built) |
 
 The backend's default labels are in its `config.yaml` (`eda-process-versions`).
 
@@ -222,6 +222,7 @@ Configuration is layered: `reference.conf` (defaults) ← `application.conf` (mo
 | `app.forward` | RC number → URL of the target adapter's `/pontonxp/message` (empty by default) |
 | `app.forward-read-timeout` / `app.forward-timeout` | deadlines while `app.forward` has entries (8 s / 10 s, with unit) |
 | `app.max-body-size` | largest request body on `/pontonxp/*` and `/admin/upload` (default `128m`); larger requests get 413 |
+| `app.grpc-max-content-length` | largest request on the gRPC port (default `16m`) |
 | `app.message-seq-floor` | lower bound of the outgoing message counter (default 0) |
 | `epmsmail.mail.*` | mail inbox dir and per-domain IMAP/SMTP settings + poll interval |
 | `epmsmail.mqtt.host/port/sub-topic/qos/consumer-id` | MQTT broker connection; `sub-topic` = `eda/request` |
@@ -230,7 +231,7 @@ Configuration is layered: `reference.conf` (defaults) ← `application.conf` (mo
 | `slick.pgsql.local.db.*` | PostgreSQL connection (for `eda` schema) |
 | `flyway.*` | DB migration settings |
 
-Environment overrides: `SMTP_ADMIN_SERVER_HOST` / `SMTP_ADMIN_SERVER_PORT`, `EMAIL_ADMIN_USER`, `EMAIL_ADMIN_PWD`, `EMAIL_ADMIN_FROM`, `FORWARD_READ_TIMEOUT`, `FORWARD_TIMEOUT`, `MAX_BODY_SIZE`, `MESSAGE_SEQ_FLOOR`, `TZ`, `JAVA_OPTS`.
+Environment overrides: `SMTP_ADMIN_SERVER_HOST` / `SMTP_ADMIN_SERVER_PORT`, `SMTP_ADMIN_CONNECTION_TIMEOUT` / `SMTP_ADMIN_TIMEOUT` / `SMTP_ADMIN_WRITE_TIMEOUT`, `EMAIL_ADMIN_USER`, `EMAIL_ADMIN_PWD`, `EMAIL_ADMIN_FROM`, `FORWARD_READ_TIMEOUT`, `FORWARD_TIMEOUT`, `MAX_BODY_SIZE`, `GRPC_MAX_CONTENT_LENGTH`, `MESSAGE_SEQ_FLOOR`, `TZ`, `JAVA_OPTS`. Logging (`logback.xml`, since 1.3.0): `LOG_LEVEL` (root), `SLICK_LOG_LEVEL`, `LOG_FORMAT` (`json` default, `text`), `DEPLOYMENT_ENVIRONMENT` (since 1.5.0).
 
 Two volumes are declared: `/conf` (holds `application.conf`) and `/storage/prod` (Pekko persistence journal and snapshots).
 
@@ -238,8 +239,8 @@ Two volumes are declared: `/conf` (holds `application.conf`) and `/storage/prod`
 
 - Build: sbt 1.10.11 with `sbt-native-packager` (no Dockerfile); `sbt compile` runs scalaxb and Pekko gRPC codegen
 - Docker image name `eegfaktura-kep`; base `eclipse-temurin:17-jre`; binary `xpadapter`; main class `XpAdapter`
-- Runtime defaults: `JAVA_OPTS=-Xmx4g`, `TZ=Europe/Vienna`
-- Key libraries: scalaxb 1.12.0 (per-namespace XML binding), Courier 3.0.1 (mail), Slick 3.5.1 + slick-pg 0.22.2, Flyway 10.20.0, Circe 0.14.3, scala-xml 2.3.0 (XXE-safe by default), PostgreSQL JDBC 42.7.3, Logback
+- Runtime defaults: `JAVA_OPTS=-Xmx4g`, `TZ=Europe/Vienna`, `LOG_FORMAT=json`
+- Key libraries: scalaxb 1.12.0 (per-namespace XML binding), Courier 3.0.1 (mail), Slick 3.5.1 + slick-pg 0.22.2, Flyway 10.20.0, Circe 0.14.16, scala-xml 2.3.0 (XXE-safe by default), PostgreSQL JDBC 42.7.14, Logback
 - Final image is substantially larger than the Go services (JRE + scalaxb-generated classes for every supported EDA protocol version)
 
 ## When PONTON is not deployed

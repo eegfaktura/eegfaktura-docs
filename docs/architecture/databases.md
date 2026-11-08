@@ -105,6 +105,7 @@ Primary key `(metering_point_id, tenant, participant_id)`; a partial unique inde
 | `process_state`, `last_process_state` | EDA process state, `ProcessStatusType` (`model/participant.go`): `NEW`, `INIT`, `PENDING`, `APPROVED`, `ACTIVE`, `INACTIVE`, `REJECTED`, `REVOKED`, `INVALID`, `ARCHIVED`, `ABORTED`, `RESTORE`, `WARN` |
 | `consent_id` | EDA consent id |
 | `tariff_id` | metering-point tariff |
+| `tech_code`, `fuel_code` | TechCode / FuelCode from the grid operator's metering-point list (since backend 1.16.0) |
 
 The participation factor is versioned in `base.metering_partition_factor` (`"partFact"`, one row per version); the view `base.activeMeteringPartition` returns the latest version per metering point and participant.
 
@@ -115,7 +116,8 @@ The participation factor is versioned in `base.metering_partition_factor` (`"par
 | `tenant` | primary key; the scoping identifier compared with the token's `tenant` claim (matches `participant.tenant`) |
 | `"communityId"` | the EC-ID issued by the network operator (`AT…`) |
 | `"rcNumber"` | RC number (`RC...`, `TE...`, `GC...`, `CC...`) |
-| `area` | `LOCAL` / `REGIONAL` / `BEG` / `GEA` |
+| `area` | `LOCAL` / `REGIONAL` / `BEG` / `GEA` / `P2P` / `EVA` (`P2P`, `EVA` since backend 1.16.0) |
+| `ec_zone_level` | Nahebereich 1–7 (empty = unknown); set from the metering-point list, a new registration gets a default from `area` (since backend 1.16.0) |
 | `"allocationMode"` | `DYNAMIC` or `STATIC` |
 | `"settlementInterval"` | `MONTHLY` / `QUARTER` / `BIANNUAL` / `ANNUAL` |
 
@@ -125,7 +127,7 @@ Important: `tenant`, `"rcNumber"` and `"communityId"` are separate values and ma
 
 Log of EDA process messages written by the backend: one row per message it receives over MQTT (including the echo of its own requests and energystore's `cr_msg_history`) with `"conversationId"`, `type` (message code), `issuer`, `direction`, `protocol`, `date` and the message as JSON. The column default of `direction` is `OUT`, but the backend writes every row with `IN`; UI actions are not logged here. This table grows continuously with platform activity; queries must be filtered (do not `SELECT *` without a `date`/`tenant` predicate).
 
-Other `base` tables: `tariff` (versioned, PK `(id, version)`, view `base.activeTariff`), `notification`, `gridoperators`. The view `base.billing_masterdata` is the read interface for billing.
+Other `base` tables: `tariff` (versioned, PK `(id, version)`, view `base.activeTariff`), `notification`, `gridoperators`, `mail_template` / `mail_template_file` (member mail texts per community, since 1.8.0), `settlement_interval_change` (each change of the settlement interval with user, time, old and new value, since 1.16.0). The view `base.billing_masterdata` is the read interface for billing.
 
 ### `eda.*`
 
@@ -149,12 +151,14 @@ The message history view in the customer SPA comes from the backend (`base.proce
 | `billing_document_item` | line items, per metering point (`metering_point_id`, tariff fields) |
 | `billing_document_number` | document number sequences per tenant |
 | `billing_document_file`, `file_data` | generated PDFs and images; the bytes are stored in `file_data.data` (large object `oid`) |
+| `billing_mail_template`, `billing_mail_template_file` | member mail text `billing-document` and its images |
+| `billing_joining_fee_record` | joining fee charged later or marked as paid outside eegfaktura |
 
-`billing_run.mail_status` is a one-shot flag: `sendAllBillingDocuments` refuses to run when it is non-empty, sets it to `IN PROGRESS` and finally to `SENT`. A send always targets **all** documents of the run.
+`billing_run.mail_status`: `sendAllBillingDocuments` sets it to `IN PROGRESS`, then `SENT` when mails went out, or `FAILED` when no mail went out; only a `FAILED` run can be sent again. A send always targets **all** documents of the run.
 
 ## Energy data — energystore + BadgerDB
 
-Energy time-series are not in PostgreSQL. **energystore** uses an embedded BadgerDB (v4) KV store on a PVC (`persistence.path`; `config-prod.yaml` sets `/opt/energy/rawdata`, the image also declares a volume `/opt/rawdata`).
+Energy time-series are not in PostgreSQL. **energystore** uses an embedded BadgerDB (v4) KV store on a PVC (`persistence.path`; the GitOps ConfigMap sets `/opt/energy/rawdata`, the image also declares a volume `/opt/rawdata`).
 
 Storage shape:
 

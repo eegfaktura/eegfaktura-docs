@@ -7,8 +7,8 @@ Java / Spring service. Generates billing documents per EEG per billing period. O
 | | |
 |---|---|
 | Language | Java 21 |
-| Framework | Spring Boot 3.5.16 + Spring Security (Maven build) |
-| Reporting | JasperReports 7.0.x (core 7.0.7; PDF invoice / credit-note rendering), Apache POI (XLSX export), FreeMarker (mail body) |
+| Framework | Spring Boot 4.0.9 + Spring Security 7 (Maven build; since 1.9.0) |
+| Reporting | JasperReports 7.0.x (core 7.0.7; PDF invoice / credit-note rendering), Apache POI (XLSX export); mail text per community, sanitized against `mail-html-policy.json` |
 | State | PostgreSQL schema `billingj` (Flyway-migrated, `ddl-auto=validate`) |
 | Auth | Auth0 java-jwt (RS256), `hasRole(EEG_ADMIN)` |
 | Inter-service | reads master data from the backend's SQL view `base.billing_masterdata`; energy values are sent by the caller (web) in the billing request |
@@ -20,20 +20,27 @@ Java / Spring service. Generates billing documents per EEG per billing period. O
 - Generate documents (invoices, credit notes, reverse-charge credit notes, information statements)
 - Track per-run mail status
 - Apply tariffs and prefix / numbering schemes per EEG
+- One-time joining fee („Beitrittsgebühr“) per member (since 1.6.0)
+- Member mail text of the billing mail (`billing-document`), editable per community (since 1.2.0)
+
+Communities of type `P2P` and `EVA` are not billed: `POST /api/billing` refuses them with 400 (since 1.10.0).
 
 ## Endpoints
 
-All under `/api/**`, every call needs a bearer token with `EEG_ADMIN` and a `Tenant` header (see [Auth](#auth)). OpenAPI via springdoc (`springdoc.pathsToMatch=/api/**`).
+All under `/api/**`, every call needs a bearer token with `EEG_ADMIN` and a `Tenant` header (see [Auth](#auth)). OpenAPI via springdoc (`springdoc.pathsToMatch=/api/**`), off by default since 1.9.0 (`SPRINGDOC_ENABLED=true` turns it on).
 
 | Path | Purpose |
 |------|---------|
 | `POST /api/billing` | start a billing run (preview or final), asynchronous — see below |
 | `GET /api/billingRuns/{id}` | run status (polled by the web), `errorSummary`, mail status / protocol |
 | `GET /api/billingRuns/{tenantId}/{clearingPeriodType}/{clearingPeriodIdentifier}` | look up the run of a period |
+| `GET /api/billingRuns/tenant/{tenantId}/settlementState` | final periods (runs with documents) and running periods; web passes it to the backend's settlement-interval change |
 | `GET /api/billingRuns/{id}/participantAmounts`, `…/billingDocuments`, `…/billingDocuments/xlsx`, `…/billingDocuments/archive` | per-member amounts, documents, XLSX export, ZIP of the PDFs |
 | `GET /api/billingRuns/{id}/billingDocuments/sendmail` | mail all documents of the run (see [Mail status](#mail-status)) |
-| `DELETE /api/billingRuns/{id}` | delete a run |
+| `DELETE /api/billingRuns/{id}` | delete a run with its preview documents; `409` for a running run or one with final documents |
 | `/api/billingConfigs/**` | per-EEG document settings incl. logo / footer image upload |
+| `GET /api/billingDocuments/tenant/{tenantId}/joiningFeeState`, `PUT` / `DELETE …/participants/{participantId}/joiningFee` | joining fee state of the members, charge later / paid outside eegfaktura |
+| `/api/mailtemplates/**` | member mail text `billing-document` (same schema as the backend: list, get, PUT, DELETE, files, preview, test) |
 | `/api/billingDocuments/**`, `/api/billingDocumentFiles/**`, `/api/billingDocumentItems/**`, `/api/billingDocumentNumbers/**`, `/api/fileData/{id}` | read / delete individual records |
 
 ## Billing-run state machine
@@ -44,23 +51,24 @@ A billing run goes through three phases per period:
 2. **Preview updates** — re-run as often as needed
 3. **Final billing** — one-shot per period; preview documents are replaced by definitive invoices; the run becomes **immutable**
 
-Once final, the run cannot be re-run (`POST /api/billing` answers `409`). To "fix" a final run, the only path is a credit note in the next period. Note that `DELETE /api/billingRuns/{id}` has no status check.
+Once final, the run cannot be re-run (`POST /api/billing` answers `409`). A final run whose months overlap a final run with documents (e.g. March and the first quarter) is also refused with `409` (since 1.8.1); a final run with an unknown period identifier gets `400`. To "fix" a final run, the only path is a credit note in the next period. `DELETE /api/billingRuns/{id}` refuses runs with final documents (since 1.8.0).
 
 `billing_run.run_status` is a `smallint` mapped by JPA **ordinal** from `BillingRunStatus`: `0 NEW`, `1 DONE`, `2 CANCELLED` (never set, placeholder), `3 RUNNING`, `4 FAILED`. New values may only be appended.
 
 ### Asynchronous run (since 1.1.0)
 
 - `POST /api/billing` answers `202 Accepted` with the `billingRunId`; the web polls `GET /api/billingRuns/{id}`.
+- A request without energy (`allocations` empty) or without `preview` is refused with `400` before a run is created (since 1.7.0/1.8.0).
 - Start is an atomic DB status claim: `RUNNING` only from `NEW` or `FAILED` (safe across replicas). A second start while running gets `409` with the running run's id; `DONE` / `CANCELLED` also get `409`.
 - The calculation runs on a small executor (`billingRunExecutor`, 2–4 threads, no queue). When it is full the claim is rolled back and the call gets `503`.
-- A preview run ends back at `NEW`, a final run at `DONE`. Any exception sets `FAILED` and persists a short `error_summary` (technical DB errors only generically; details in the server log). A `FAILED` run can be restarted; partial documents of the previous attempt are deleted first.
+- A preview run ends back at `NEW`, a final run at `DONE`. Any exception sets `FAILED` and persists a short `error_summary` (technical DB errors only generically; details in the server log). A `FAILED` run can be restarted; partial documents of the previous attempt are deleted first. At start, billing sets every run left `RUNNING` by a crash or restart to `FAILED` (since 1.10.0).
 - Flyway `V1_15` added `error_summary` and a unique index on `(tenant_id, clearing_period_type, clearing_period_identifier)`.
 
 ## Mail status
 
-Each `billing_run` has a `mail_status` field. It is a one-shot flag: `sendmail` sets it to `IN PROGRESS`, then `SENT`, and refuses to run while it is non-empty (the UI also hides the re-send button). The per-recipient result is stored as text in `send_mail_protocol` (`OK`, `FEHLER`, or a warning for rejected address parts on an otherwise delivered mail).
+Each `billing_run` has a `mail_status` field: `sendmail` sets it to `IN PROGRESS`, then `SENT` when mails went out, or `FAILED` when documents existed and no mail went out (since 1.8.0). Only a `FAILED` run can be sent again; every other status refuses a further mail run. The per-recipient result is stored as text in `send_mail_protocol` (`OK`, `FEHLER`, or a warning for rejected address parts on an otherwise delivered mail).
 
-A run is therefore mailed once; there is no per-recipient re-send.
+A run with some failed mails stays `SENT`; there is no per-recipient re-send.
 
 Mail path and address handling: see [Architecture / Notification e-mail](../architecture/email.md).
 
@@ -76,7 +84,7 @@ Workaround for `superuser` operators: grant them `EEG_ADMIN` in addition. This i
 
 A follow-up in this service's source is to accept `superuser` as an alias for `EEG_ADMIN`. Low priority.
 
-Token checks: RS256 signature; `exp` / `nbf` / `iat` are checked when present (60 s leeway), `exp` is not required; no `iss` / `aud` check. The Spring profile `dev` disables security entirely (`DevSecurityConfig`).
+Token checks: RS256 signature; `exp` / `nbf` / `iat` are checked when present (60 s leeway), `exp` is not required; no `iss` / `aud` check. The JWT chain applies in every Spring profile (the former `DevSecurityConfig` was removed in 1.7.0).
 
 ## JWT cert
 
@@ -100,6 +108,7 @@ Billing does not fetch energy data. The web builds the request from the energyst
 | energy (producer) | producer Zählpunkte → credit note / info | `allocationKWh` × `tariff_credit_amount_per_producedkwh` (ct/kWh), tariff discount applied |
 | membership fee | member (EEG tariff) | `tariff_participant_fee` per billing run, as its own position |
 | metering point fee | Zählpunkte with `tariff_use_metering_point_fee` | `tariff_metering_point_fee` |
+| joining fee | member, once: in the first final run with an energy item, when the EEG tariff has `tariff_joining_fee` > 0 and the member has no final document with energy or joining fee yet | 1 × `tariff_joining_fee` on the invoice (own VAT setting, no discount); previews show it without consuming it |
 
 Producers with a VAT id get an `INFO` document, or a reverse-charge credit note (`CREDIT_NOTE_RC`) when the EEG setting "credit notes for all producers" is on; producers without VAT id get a `CREDIT_NOTE`. Documents with a gross amount of 0 are not created.
 
@@ -121,10 +130,12 @@ Owns schema `billingj`. Key tables:
 | `billing_document_file`, `file_data` | generated PDFs and uploaded images (`oid` blobs) |
 | `billing_document_number` | document number sequences per tenant |
 | `billing_config` | per-EEG document settings |
+| `billing_mail_template`, `billing_mail_template_file` | member mail text `billing-document` and its images |
+| `billing_joining_fee_record` | joining fee charged later or marked as paid outside eegfaktura |
 
 Master data is read through the backend's view `base.billing_masterdata` (mapped read-only via `@Subselect`), filtered by `tenant_id` — a cross-schema SQL dependency on the backend.
 
-Migrations are Flyway (`src/main/resources/db/migration`, `V1_0` … `V1_15`). There is no baseline-on-migrate: pre-existing `billingj` tables without Flyway history make the start fail (see [Architecture / Databases](../architecture/databases.md)).
+Migrations are Flyway (`src/main/resources/db/migration`, `V1_0` … `V1_20`). There is no baseline-on-migrate: pre-existing `billingj` tables without Flyway history make the start fail (see [Architecture / Databases](../architecture/databases.md)).
 
 ## Document templates
 
@@ -155,6 +166,8 @@ These are the variables the application actually reads (`application.properties`
 | `MAIL_SMTP_AUTH`, `MAIL_SMTP_STARTTLS_ENABLE` | SMTP auth / STARTTLS toggles (defaults `true` / `false`) |
 | `MAIL_NO_REPLY_TO` | sender address, also used for the Message-ID domain (default `no-reply@eegfaktura.at`) |
 | `HOST_PORT` | HTTP listen port (default `8080`) |
+| `SPRINGDOC_ENABLED` | API docs and Swagger UI (default `false`) |
+| `LOG_LEVEL`, `LOG_FORMAT`, `DEPLOYMENT_ENVIRONMENT` | log level (default `info`), `json` (default) or `text`, environment name on every log line |
 
 There is **no** `SPRING_DATASOURCE_*` or `KEYCLOAK_*` configuration — the datasource is driven by the `JDBC_DATABASE_*` variables and token validation uses the local PEM file (`JWT_PUBLICKEYFILE`), not a Keycloak issuer URL.
 
