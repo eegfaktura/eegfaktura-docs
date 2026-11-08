@@ -67,7 +67,7 @@ current `260716` template).
 | MandatRef / MandatDat (not in template) | member SEPA mandate reference / date | optional; date as text or date cell |
 | Email (U) | member e-mail | several addresses separated by `;` allowed; validated against the shared address rule; an invalid address is reported and the member imported **without** e-mail |
 | TelefonNr (V) | member phone | not validated |
-| SteuerNr / UmsatzsteuerNr (W, X) | member tax / VAT number | |
+| UmsatzsteuerNr (X) | member VAT number | column W (`SteuerNr`) of the template is ignored |
 | MitgliedsNr (Y) | member number | taken from the member's **first** row; a number used by several members in the file or already assigned to a *different* existing member is reported as a **warning** (rows still import) |
 | Zählpunktstatus (Z) | `ACTIVE` / `ACTIVATED` / `REGISTERED` → active member + active metering point; `NEW` → member and metering point process state `NEW`, metering point status `INIT` | case-insensitive, surrounding spaces tolerated; any other value rejects the row (reported) |
 | registriert seit (AA) | metering point `registeredSince` and `activeSince` | text or date cell; empty → Jan 1 of the current year. For **online** (EDA-connected) EEGs `registeredSince` is always the import day (`activeSince` still comes from this column) |

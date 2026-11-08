@@ -8,7 +8,7 @@ Historically named `registration-backend`.
 
 | | |
 |---|---|
-| Language | Scala 2.13.9 |
+| Language | Scala 2.13.18 (sbt 1.10.11) |
 | Framework | Apache Pekko 1.2.1 + Pekko HTTP 1.2.0 (migrated from Akka) |
 | Audience | operators with the `superuser` realm role |
 | Config style | HOCON (`-Dconfig.file=...`) |

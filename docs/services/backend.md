@@ -42,7 +42,7 @@ Representative endpoints:
 | `/master/updatepartfact`, `/master/masterdata` | POST / GET | Basic auth (`ProtectApi`), `/EEG_ADMIN` group, `X-Tenant` header | external API |
 
 !!! note
-    There are no dedicated `/health` or `/ready` endpoints — no HTTP health endpoint exists for k8s probes.
+    The Kubernetes probe endpoints `/healthz` and `/readyz` are unauthenticated — see [Architecture / Authentication](../architecture/auth.md#unauthenticated-probe-endpoints).
 
 ## Auth
 
