@@ -51,7 +51,7 @@ Two operational caveats:
 
 ### Public key or X.509 certificate
 
-PyJWT itself does not accept an X.509 certificate as the verification key. Since 1.1.0 filestore reads either a `BEGIN PUBLIC KEY` block or a `BEGIN CERTIFICATE` block (the realm certificate other components read) from the key file and passes the RSA public key to PyJWT (`_load_public_key` in `app/auth.py`).
+PyJWT itself does not accept an X.509 certificate as the verification key. filestore reads either a `BEGIN PUBLIC KEY` block or a `BEGIN CERTIFICATE` block (the realm certificate other components read) from the key file and passes the RSA public key to PyJWT (`_load_public_key` in `app/auth.py`).
 
 ### Tokens need a matching `aud`
 

@@ -73,7 +73,7 @@ Notes:
 
 `at.ourproject.vfeeg.api` has its own tenant mapper (`tenantIds`) that is **single-valued** (`multivalued=false`, `jsonType.label=String`) and no group mapper. `at.ourproject.vfeeg.admin` has only the audience mapper.
 
-Consequence for `ProtectApi` (see [below](#machine-to-machine-access-http-basic-protectapi)): with the realm as declared in `EEGFaktura.yaml`, the ID token from `…api` carries `tenant` as a plain JSON string and no `access_groups`. backend parses `tenant` into a string array, so the claim parse fails and the request gets 403; it would also miss `/EEG_ADMIN`. energystore (since 1.9.0) also reads a single string value. Whether the running realms differ from the YAML is not visible in the repositories.
+Consequence for `ProtectApi` (see [below](#machine-to-machine-access-http-basic-protectapi)): with the realm as declared in `EEGFaktura.yaml`, the ID token from `…api` carries `tenant` as a plain JSON string and no `access_groups`. backend parses `tenant` into a string array, so the claim parse fails and the request gets 403; it would also miss `/EEG_ADMIN`. energystore also reads a single string value. Whether the running realms differ from the YAML is not visible in the repositories.
 
 ## Per-service auth check
 
@@ -84,7 +84,7 @@ Each backend enforces auth independently.
 | **backend** (Go) | coreos/go-oidc v3 verifier, keys via OIDC discovery/JWKS, `SupportedSigningAlgs` RS256 only; Keycloak settings from the `KEYCLOAK_CONFIG` file (default `./keycloak.json`, entries `app` and `api`). `Protect` / `ConditionProtect` / `GQLProtect` middleware | `iss` must match the provider URL; `aud` not checked (`SkipClientIDCheck: true`); `exp` required (go-oidc rejects a missing/expired `exp`); only RS256 accepted | tenant from header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless the token has realm role `superuser` (mismatch: 403 on REST, 401 on `/query`); `access_groups` decides admin (`/EEG_ADMIN`) vs. user (`/EEG_USER`). On `/query` (GraphQL) the mutation `updateEegModel` requires `EEG_ADMIN` (since 1.16.0) |
 | **billing** (Java / Spring) | Auth0 java-jwt, `Algorithm.RSA256` with an X.509 cert read from `JWT_PUBLICKEYFILE` (converted to an `RSAPublicKey`); `anyRequest().hasRole(EEG_ADMIN)` (`/` and `/swagger-ui` permitted) | no `iss`/`aud` check; `exp` checked when present (60 s leeway), not required | requires `EEG_ADMIN` in `access_groups`; `Tenant` HTTP header must be in the JWT `tenant` array (case-insensitive) unless realm role `superuser`; resources additionally compare path/record tenant with the header (`TenantContext.validateTenant`). The JWT chain applies in every Spring profile (since 1.7.0) |
 | **energystore** (Go) | coreos/go-oidc v3 verifier via `KEYCLOAK_CONFIG` (same file format as backend, RS256 only), `ProtectApp` / `GQLProtect` middleware | as backend (`SkipClientIDCheck: true`) | header `tenant` (fallback `X-Tenant`) must be in the JWT `tenant` array unless realm role `superuser`; GraphQL resolvers compare their `tenant` argument with the checked header (`tenantctx`) |
-| **filestore** (Python) | PyJWT, `algorithms=["RS256"]` (HS256 / `none` → 401); key file from the settings field `JWT_PUBLIC_KEY_FILE`, filled from env `JWT_KEY_FILE` (the GitOps manifests set this one) or directly from env `JWT_PUBLIC_KEY_FILE` (takes precedence), loaded once at start | `aud` must equal `JWT_AUDIENCE` (default `account`); `exp` required (`options={"require": ["exp"]}`); `iss` not checked | the key file holds Keycloak's RSA public key or its X.509 certificate in PEM form (since 1.1.0); anything else stops the start; `assert_tenant` in each resolver after loading the resource, `superuser` exempt |
+| **filestore** (Python) | PyJWT, `algorithms=["RS256"]` (HS256 / `none` → 401); key file from the settings field `JWT_PUBLIC_KEY_FILE`, filled from env `JWT_KEY_FILE` (the GitOps manifests set this one) or directly from env `JWT_PUBLIC_KEY_FILE` (takes precedence), loaded once at start | `aud` must equal `JWT_AUDIENCE` (default `account`); `exp` required (`options={"require": ["exp"]}`); `iss` not checked | the key file holds Keycloak's RSA public key or its X.509 certificate in PEM form; anything else stops the start; `assert_tenant` in each resolver after loading the resource, `superuser` exempt |
 | **admin-backend** (Scala / Pekko) | Nimbus JOSE+JWT, RS256 key selector over Keycloak JWKS (`RemoteJWKSet`, URL from `KEYCLOAK_URL`/`KEYCLOAK_REALM` or `KEYCLOAK_AUTHENTICATOR_JWKS_URL`) | `iss` must equal `<KEYCLOAK_URL>/realms/<KEYCLOAK_REALM>` (case-insensitive); `aud` must contain `KEYCLOAK_AUDIENCE` (set to the admin SPA client id, `at.ourproject.vfeeg.admin`); `exp` required | realm role `superuser` on all routes (`/eeg`, `/vfeeg`, `/admin`), otherwise 403 `{"error":"superuser role required"}` |
 | **eda-xp** (Scala / Pekko) | no JWT validation | — | talks to the other services via MQTT; its HTTP routes (`/pontonxp/...`, `/admin/upload`) and gRPC admin server carry no bearer check |
 
@@ -129,7 +129,7 @@ How `/readyz` behaves:
 - eda-xp has no ingress. Its port 6090 is reachable from outside through NodePort 32369, which Ponton uses for inbound messages, so the probe paths can be reached there too. Every route on that port is unauthenticated anyway, because Ponton inbound carries no token.
 
 !!! note
-    eda-xp gets a startup and a liveness probe, but **no readiness probe** for now. It runs with one replica, and a NotReady pod drops out of both of its Services: Ponton inbound (6090) and gRPC (9093, used by backend, energystore and admin-backend). Ponton would get a refused connection instead of an HTTP error. A readiness probe follows once it is confirmed that Ponton redelivers after a refused connection.
+    The GitOps base (prod and pilot) does not define kubelet probes yet; the endpoints are in place for them. For eda-xp a readiness probe needs care: it runs with one replica, and a NotReady pod drops out of both of its Services, Ponton inbound (6090) and gRPC (9093, used by backend, energystore and admin-backend), so Ponton would get a refused connection instead of an HTTP error.
 
 ## Machine-to-machine access (HTTP Basic / `ProtectApi`)
 
@@ -144,7 +144,7 @@ Notes:
 
 - The Basic credentials are an ordinary Keycloak username/password; the service exchanges them for a token internally. backend additionally requires `/EEG_ADMIN` in `access_groups`; energystore checks only the tenant. Neither applies the `superuser` exemption on this path.
 - The exchange uses `at.ourproject.vfeeg.api`, the realm client with Direct Access Grants enabled. The customer SPA client `…app` has it switched off (`directAccessGrantsEnabled: false`); for the admin client `…admin` the realm file does not set it, so it depends on the Keycloak default for imported clients.
-- Both decode the Basic value with standard base64 (RFC 7617); energystore since 1.9.0.
+- Both decode the Basic value with standard base64 (RFC 7617).
 - Routes guarded by `Protect` (bearer-only) do **not** accept Basic. In particular the participant endpoints — `POST /participant`, `PUT /participant/{id}`, `POST /participant/{id}/confirm`, `PUT /participant/v2/{id}`, `DELETE /participant/v2/{id}` (`api/participantController.go`) — require a bearer JWT with `EEG_ADMIN`; a Basic request returns HTTP 403. There is currently no `ProtectApi` equivalent for participant writes.
 
 ## Member-data binding
@@ -189,7 +189,7 @@ The billing service verifies JWTs (Auth0 java-jwt) using an X.509 certificate re
 
 ## Filestore key file
 
-PyJWT itself does **not** accept an X.509 certificate as the verification key. Since 1.1.0 filestore reads either a PEM public key or a PEM certificate from the key file and extracts the RSA public key from a certificate; a file that is neither, or no RSA key, stops the start. The key file is supplied via env `JWT_KEY_FILE` (default of the settings field `JWT_PUBLIC_KEY_FILE`; an env `JWT_PUBLIC_KEY_FILE` overrides it) and read once at start. PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).
+PyJWT itself does **not** accept an X.509 certificate as the verification key. filestore reads either a PEM public key or a PEM certificate from the key file and extracts the RSA public key from a certificate; any other file stops the start. The key file is supplied via env `JWT_KEY_FILE` (default of the settings field `JWT_PUBLIC_KEY_FILE`; an env `JWT_PUBLIC_KEY_FILE` overrides it) and read once at start. PyJWT also enforces the `aud` claim; filestore validates it against `JWT_AUDIENCE` (default `account`).
 
 ## Related
 

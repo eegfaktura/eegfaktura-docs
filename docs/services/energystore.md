@@ -14,7 +14,7 @@ Go service that stores per-period energy time-series and answers report queries.
 | Language | Go 1.26 (`go 1.26.0`, toolchain `go1.26.10`; module `at.ourproject/energystore`) |
 | Storage | BadgerDB v4 (`badger/v4` v4.9.1, embedded KV) on PVC, values JSON-encoded |
 | Bus | MQTT subscriber (paho.mqtt.golang, MQTT 3.1.1) |
-| APIs | REST (gorilla/mux) + GraphQL (gqlgen, `/query`); gRPC clients to backend and eda-xp; HTTP client to backend `GET /participant` (member tokens, since 1.9.0) |
+| APIs | REST (gorilla/mux) + GraphQL (gqlgen, `/query`); gRPC clients to backend and eda-xp; HTTP client to backend `GET /participant` (member tokens) |
 | Auth | JWT verify via go-oidc, `tenant` / `X-Tenant` header check |
 | Per-EEG store | one Badger database per (`tenant`, `ecId`) |
 | Replicas | Single (BadgerDB lock + RWO PVC) |
@@ -128,7 +128,7 @@ The report response is the matrix shape consumed by the SPA's chart code. See [r
 
 The bearer JWT is verified with go-oidc against the Keycloak realm configured in `keycloak.json` (entry `app`); `iss` is checked, the audience check is off (`SkipClientIDCheck: true`). The tenant is read from the `tenant` header, falling back to `X-Tenant`, and must be in the JWT's `tenant` claim (array, compared case-insensitively). Missing token or tenant → 403, invalid token → 401, tenant mismatch → 403 on REST and 401 on GraphQL. The GraphQL resolvers also compare their `tenant` argument with the verified tenant.
 
-Users with the realm role `superuser` skip the tenant-membership check. Since 1.9.0 a member token (neither `/EEG_ADMIN` nor `/EEG_OWNER` in `access_groups`, not `superuser`) reads per-meter energy only of its own metering points: energystore asks the backend (`GET /participant`, config `services.backend-api`) which metering points belong to the caller; without that setting, or while the backend is unreachable, such requests get 503. `rawdata/delete` explicitly requires `superuser`.
+Users with the realm role `superuser` skip the tenant-membership check. A member token (neither `/EEG_ADMIN` nor `/EEG_OWNER` in `access_groups`, not `superuser`) reads per-meter energy only of its own metering points: energystore asks the backend (`GET /participant`, config `services.backend-api`) which metering points belong to the caller; without that setting, or while the backend is unreachable, such requests get 503. `rawdata/delete` explicitly requires `superuser`.
 
 The `/query/rawdata` and `/query/{ecid}/metadata` routes take `Authorization: Basic …` credentials (standard base64), run a password grant against the `api` client from `keycloak.json`, and check `X-Tenant` against the resulting token's `tenant` claim.
 
