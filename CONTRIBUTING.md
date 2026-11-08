@@ -37,7 +37,7 @@ outside `docs/`/`mkdocs.yml` don't affect the rendered site and need no deploy.
 
 ## Scope
 
-This repository contains **developer and maintainer documentation** (architecture, service behaviour, protocols, operational procedures). It is not an end-user manual, and it intentionally does not contain production sizing data, credentials, or instance-specific configuration.
+This repository contains **developer and maintainer documentation** (architecture, service behaviour, protocols, code internals, the development workflow). Operational procedures — backups, scaling, monitoring, rollout gating — belong to the platform repository. It is not an end-user manual, and it intentionally does not contain production sizing data, credentials, or instance-specific configuration.
 
 ## Licensing
 

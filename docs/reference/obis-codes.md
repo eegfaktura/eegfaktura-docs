@@ -18,7 +18,7 @@ OBIS (Object Identification System) codes identify energy-meter readings. eegfak
 | `1-1:1.9.0 G.01T` | `G.01 × Teilnahmefaktor / 100` | computed; **mandatory for billing periods from 2024-04-08** |
 | `1-1:2.9.0 G.02` | Theoretically available share | computed by the network operator |
 | `1-1:2.9.0 G.03` | Actually covered share from the EEG | computed; **billing-relevant** for consumers |
-| `1-1:2.9.0 G.03R` | Subset of G.03 from renewable production | computed (sub-variant) |
+| `1-1:2.9.0 G.03R` | Subset of G.03 from renewable production | computed (sub-variant; energystore marks it "only for BEG"). Not stored by v1 |
 
 ### Producer (GENERATION)
 
@@ -45,13 +45,14 @@ OBIS (Object Identification System) codes identify energy-meter readings. eegfak
 
 ### v1 — Badger slots
 
-energystore v1 decodes each `meterCode` from an inbound `MqttEnergyMessage` into a fixed slot in its Badger store. T-/R-variants are mapped to the same slot as the non-T counterpart (last-write-wins).
+energystore v1 decodes each `meterCode` from an inbound `MqttEnergyMessage` into a fixed slot in its Badger store (`utils.DecodeMeterCode`). T-variants are mapped to the same slot as the non-T counterpart; `store/importFunctions.go` (`organizeMetaCodeImport`) imports them **after** the base codes, so when a payload carries both, the T value wins. `G.03R` is decoded but **skipped** on import — it never reaches the store.
 
 | meterCode | Type | Source delta | Storage slot |
 |---|---|---|---|
 | `1-1:1.9.0 G.01` / `G.01T` | CON | 0 | `consumer[0]` = consumption |
 | `1-1:2.9.0 G.02` | SHARE | 1 | `consumer[1]` = G.02 (`allocation` field in report) |
-| `1-1:2.9.0 G.03` / `G.03R` | COVER | 2 | `consumer[2]` = G.03 (`utilization` field in report) |
+| `1-1:2.9.0 G.03` | COVER | 2 | `consumer[2]` = G.03 (`utilization` field in report) |
+| `1-1:2.9.0 G.03R` | COVER | 2 | not stored (skipped on import) |
 | `1-1:2.9.0 G.01` / `G.01T` | GEN | 0 | `producer[0]` = production |
 | `1-1:2.9.0 P.01` / `P.01T` | PLUS | 1 | `producer[1]` = P.01 (`allocation` field in report) |
 
@@ -59,13 +60,13 @@ energystore v1 decodes each `meterCode` from an inbound `MqttEnergyMessage` into
 
 energystore-v2 stores one row per `(tenant_id, ec_id, metering_point, meter_code, ts)`. The `meter_code` is the OBIS string verbatim. T-/R-variants land in separate rows, which is forward-compatible with future per-allocation accounting (ELWG multi-participation).
 
-The slot-position decoder still applies T-/R-variants to the same logical slot as the non-T counterpart for current reporting — same observable behaviour as v1 — but the raw rows coexist in the table, so future code can read them separately without a re-encrypt/re-import.
+The slot-position decoder (`internal/queryengine/codes.go`) still applies T-/R-variants to the same logical slot as the non-T counterpart for current reporting — unlike v1, this includes `G.03R` — but the raw rows coexist in the table, so future code can read them separately without a re-encrypt/re-import.
 
 ### Direction detection
 
-A new metering point is registered as a **producer** only if its first payload contains a `P.01` or `P.01T` code. A payload with only `G.01` is ambiguous — both directions use `G.01` — and the meter is then registered as a **consumer**.
+In energystore v1 (`utils.ExamineDirection`), a new metering point is registered as a **producer** if its first payload contains a producer code — `1-1:2.9.0 G.01`, `1-1:2.9.0 G.01T`, `1-1:2.9.0 P.01` or `1-1:2.9.0 P.01T`. Otherwise it is registered as a **consumer**. The two `G.01` codes are distinguished by their OBIS prefix (`1-1:2.9.0` = production, `1-1:1.9.0` = consumption).
 
-This matters for sample-data generation: a producer's first MQTT publish must include a `P.01` value, even if zero, otherwise the meter ends up in the wrong direction.
+This matters for sample-data generation: a producer's first MQTT publish must use the `1-1:2.9.0` codes, otherwise the meter ends up in the wrong direction.
 
 ## AllocDynamicV2 — pass-through
 
@@ -78,7 +79,7 @@ Consequences:
 
 ## Customer SPA chart mapping
 
-The customer SPA's chart helper uses these field names internally:
+The customer SPA's chart helper (`src/util/ReportHelper.ts`) uses these field names internally:
 
 ```ts
 // CONSUMPTION: dataKey "distributed" = EEG (green), "consumed" = EVU (purple)
@@ -108,7 +109,7 @@ eegfaktura uses the abbreviated `<A-B>:<C.D.E>` prefix followed by a vendor toke
 
 ## ELWG outlook (October 2026)
 
-The Austrian ElWG that takes full effect on **2026-10-01** is expected to introduce additional shared-energy forms (peer-to-peer contracts under §68, self-supply across multiple meters of one member). EDA has already introduced T-/R-variants for multi-participation as of 2024-04-08 — those are accepted by both v1 and v2.
+The Austrian ElWG that takes full effect on **2026-10-01** is expected to introduce additional shared-energy forms (peer-to-peer contracts under §68, self-supply across multiple meters of one member). EDA has already introduced T-/R-variants for multi-participation as of 2024-04-08 — v1 stores the T-variants (`G.01T`, `P.01T`) and drops `G.03R`; v2 keeps all of them.
 
 The exact OBIS-code surface for the new shared forms is not yet published by E-Control / ebUtilities. Phase 2 of the v2 schema work will introduce a per-allocation dimension so the same metering point can carry several parallel allocation streams.
 

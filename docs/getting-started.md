@@ -79,7 +79,7 @@ one you are changing and match its existing patterns.
 | `eegfaktura-eda-xp` | Scala (Pekko) | `sbt test` |
 | `eegfaktura-admin-backend` | Scala (Pekko) | `sbt test` |
 | `eegfaktura-web` | React 18 + Ionic 7 + Vite | `pnpm run test.unit` (Vitest) — **pnpm only** (version in `packageManager`), never `npm install` |
-| `eegfaktura-admin` | React (CRA) | `CI=true npm test` |
+| `eegfaktura-admin` | React + MUI + Vite | `npx vitest run` (Vitest) |
 
 The table is the short version. The authoritative commands are in each repo's
 `.github/workflows/pr-checks.yml`, which runs on every pull request (unit and
@@ -183,7 +183,10 @@ most common source of confusion:
     its `latest` points at the newest merge, not at anything released.
 
 The end-to-end flow (merge with CHANGELOG stamp → CI `sha-*` → `promote-image.yml`
-→ gitops and Compose pull requests → operator sync in ArgoCD) is documented in
+→ gitops and Compose pull requests → operator sync in ArgoCD) is defined in
+[`promote-image.yml`](https://github.com/vfeeg-development/eegfaktura-gitops/blob/main/.github/workflows/promote-image.yml)
+itself (its header comment explains each step); the CI side (`sha-*` / `latest`
+builds per source repo) is in
 [`build-pipeline.md`](https://github.com/vfeeg-development/eegfaktura-platform/blob/main/docs/build-pipeline.md).
 
 ## 7. Repo & documentation map

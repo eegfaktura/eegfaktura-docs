@@ -6,11 +6,11 @@ Developer and maintainer documentation for the **eegfaktura** software suite —
 
 A microservice-based platform that:
 
-- Manages **member master data** of energy communities (participants, metering points, contracts)
+- Manages **member master data** of energy communities (participants, metering points, tariffs; contract documents in filestore)
 - Drives the **EDA-protocol lifecycle** of members and metering points: register, activate, deactivate, change participation factor, request energy data, request participant list
-- **Imports energy data** from Austrian network operators via the **EDA** (Energie Daten Austausch) protocol — the network operator performs the per-period allocation by Teilnahmefaktor; eegfaktura stores the resulting values
+- **Imports energy data** from Austrian network operators via **EDA**, the Austrian energy-industry data exchange, — the network operator performs the per-period allocation by Teilnahmefaktor; eegfaktura stores the resulting values
 - **Generates billing documents** based on the allocated consumption / production / surplus per period
-- Provides **customer-facing UIs** for members and a **maintenance UI** for community administrators
+- Provides a **customer-facing UI** for members and community admins and a **maintenance UI** for the VFEEG operating team
 
 ## Documentation map
 
@@ -29,7 +29,7 @@ If you are…
 
 ## Conventions
 
-- Examples use generic placeholders: `<eeg-domain>` for the public domain, `<tenant-id>` for the EEG community ID, `<namespace>` for the Kubernetes namespace.
+- Examples use generic placeholders: `<eeg-domain>` for the public domain, `<tenant-id>` for an EEG's tenant (`base.eeg.tenant`, not the community ID), `<namespace>` for the Kubernetes namespace.
 - Service-internal DNS uses Kubernetes service-name patterns: `<service>.<namespace>.svc.cluster.local`.
 - JWT claims are documented with the exact claim name as emitted by Keycloak.
 - These docs focus on **how things connect** — architecture, schemas, protocols, code-level gotchas. Deployment, provisioning, production sizing, and operational tuning live in the platform repo (`eegfaktura-platform`), not here.

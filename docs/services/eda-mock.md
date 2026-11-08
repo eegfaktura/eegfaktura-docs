@@ -1,68 +1,37 @@
 # eda-mock
 
-!!! warning "Not a real service in this repository — conceptual page"
-    There is **no** `eda-mock` source in or near the eda-xp repository; the only `mock` code in eda-xp is test-fixture (`EmailMock`). The currently deployed `eegfaktura-eda-mock` (in the platform manifests) is **not** a Scala stub at all — it is two `traefik/whoami` containers (ports 6060 and 6090) that simply echo HTTP requests. It does **not** publish synthetic MQTT messages, merge conversation state, or stub EDA process flows. The sections below describe the *concept* of an EDA mock that an environment without a real PONTON link would need; they do not reflect the behaviour of the deployed placeholder. Verify against the actual chart before relying on any specific behaviour.
+!!! warning "Placeholder, not a functional EDA mock"
+    There is **no** `eda-mock` source code in any eegfaktura component repository; the only `mock` code in eda-xp is test-fixture (`EmailMock`). The deployed `eegfaktura-eda-mock` exists only in the **dev zone** and is defined in the platform repository (`overlays/dev/resources/eda-mock.yaml`, earlier `k8s/71-eda-mock.yaml`); it is not part of the production manifests and not part of the docker-compose stack. It is two `traefik/whoami:v1.10` containers (ports 6060 and 6090) that simply echo HTTP requests. It does **not** publish MQTT messages, stub EDA process flows, or answer like a grid operator. A functional EDA mock is planned but not implemented.
 
-A stub of the EDA gateway for environments without a real PONTON link. Lets the rest of the stack run end-to-end (Zählpunkt activation, energy-data flow, participation-factor changes) without involving the network operator.
+A stand-in for the external Ponton messenger (KEP) in the dev zone, so that `eda-xp` starts and can send outbound messages without a real PONTON link.
 
 ## At a glance
 
 | | |
 |---|---|
-| Concept | drop-in stand-in for `eda-xp` + PONTON |
-| Deployed reality | `traefik/whoami` echo containers (ports 6060, 6090) — see warning above |
-| Inbound (concept) | none from external (no PONTON) |
-| Outbound (concept) | MQTT publish to the same topic shape as eda-xp |
-| State (concept) | typically stateless / minimal |
+| Role | replaces the Ponton messenger behind `eda-xp` (not `eda-xp` itself) |
+| Image | `traefik/whoami:v1.10` (Docker Hub), two containers in one Deployment |
+| Ports | 6060 (HTTP target of eda-xp's outbound messages), 6090 (echo only) |
+| Inbound | none — it never calls eda-xp |
+| Outbound | none — it does not publish to MQTT |
+| State | stateless |
 
-## When to use
+## How it is wired
 
-eda-mock replaces `eda-xp` in:
+In the dev zone, eda-xp's `application.conf` points `app.kepserver.url` at `http://eegfaktura-eda-mock:6060/ponton/eda/webservice/outbound`. eda-xp POSTs every outbound EDA message (XML) there. whoami answers every request with HTTP 200 and an echo of the request, and eda-xp's HTTP client treats any 200/202 response as a successful send.
 
-- **Dev environments** — local + cluster-internal flows without external dependencies
-- **Sample / demo instances** — to exercise the customer SPA's full flow including process history
-- **CI environments** — for end-to-end tests
+## Effect on the flows
 
-A real production instance uses `eda-xp` + PONTON instead.
+Because nothing ever comes back from a grid operator:
 
-## What it stubs
-
-For each outbound EDA process triggered by the backend (e.g. `EC_REQ_ONL`), eda-mock generates a plausible response message and publishes it back to MQTT on the appropriate inbound topic. The backend's subscription handler consumes it as if it had originated from the real network operator.
-
-Stubbed flows:
-
-| Process | Stubbed response |
-|---------|------------------|
-| `EC_REQ_ONL` (Zählpunkt activation) | sends `ONLINE_REG_COMPLETION` after a short delay → metering point goes to `ACTIVE` |
-| `EC_REQ_OFF` | sends a completion message → metering point goes to inactive |
-| `EC_REQ_PRZ` (participation factor) | sends an approval message |
-| `EC_REQ_LST` (participant list) | returns a generated list |
-| `EC_REQ_ENE` (energy data) | typically not stubbed — sample energy data is published directly via MQTT |
-
-The exact set of stubbed flows depends on the eda-mock revision.
-
-## UI effect
-
-When eda-mock is in use instead of eda-xp, the customer SPA's "Messages" menu may or may not appear, depending on whether the eda-mock publishes message-history entries. Typically the dev experience is:
-
-- Process History shows the activation lifecycle
-- Messages menu either shows synthetic messages or is suppressed
+- Outbound requests (e.g. `ANFORDERUNG_ECON`, `ANFORDERUNG_CPF`) are sent "successfully" and end there.
+- No `ANTWORT_*`, `ZUSTIMMUNG_*`, `ABSCHLUSS_*` or `ABLEHNUNG_*` message arrives, so the backend never moves a metering point past the state the outbound request left it in, and process history shows no grid-operator responses.
+- No energy data (`CR_MSG`) arrives. Energy data for dev/test must be seeded directly (e.g. by publishing on MQTT).
+- Real EDA error and rejection flows cannot be tested with it.
 
 ## Config
 
-Minimal. The mock needs MQTT to publish and the same EEG / tenant configuration as eda-xp would use, so the messages route to the right `<tenant>` topic slot.
-
-| Variable | Purpose |
-|----------|---------|
-| `MQTT_*` | broker connection |
-| `TENANT` | which tenant to publish under |
-| `RESPONSE_DELAY_MS` | how long to wait before publishing the stubbed response |
-
-## Limitations
-
-- No XML schema-version negotiation — the mock produces a fixed shape.
-- No conversation-state merge against `eda.*` — the mock publishes synthetic messages without prior context.
-- Not a substitute for testing real EDA error / rejection flows.
+None. The whoami containers only take `--port` as an argument.
 
 ## Related
 

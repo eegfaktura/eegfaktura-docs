@@ -15,25 +15,26 @@ This documentation covers:
 
 ## Audience
 
-Primary: **developers and maintainers** working on the eegfaktura services or operating a deployment.
+Primary: **developers and maintainers** working on the eegfaktura services. Operating a deployment (provisioning, backups, scaling, rollout) is documented in the platform repository, not here.
 
 Not a user manual for end users (members of an energy community) — see the official [docs.eegfaktura.at](https://docs.eegfaktura.at) for workflow / process documentation.
 
 ## Source code
 
-The eegfaktura suite is composed of multiple services, each in its own repository in the [`eegfaktura`](https://github.com/eegfaktura) organisation (energystore-v2 currently lives in the `vfeeg-development` organisation):
+The eegfaktura suite is composed of multiple services, each in its own repository in the [`eegfaktura`](https://github.com/eegfaktura) organisation:
 
 | Service | Repository | Language |
 |---------|------------|----------|
 | `eegfaktura-backend` | https://github.com/eegfaktura/eegfaktura-backend | Go |
 | `eegfaktura-billing` | https://github.com/eegfaktura/eegfaktura-billing | Java / Spring Boot |
 | `eegfaktura-energystore` | https://github.com/eegfaktura/eegfaktura-energystore | Go |
-| `eegfaktura-energystore-v2` | https://github.com/vfeeg-development/eegfaktura-energystore-v2 | Go (next-gen store) |
+| `eegfaktura-energystore-v2` | https://github.com/eegfaktura/eegfaktura-energystore-v2 | Go (next-gen store, not in production yet) |
 | `eegfaktura-filestore` | https://github.com/eegfaktura/eegfaktura-filestore | Python / FastAPI |
 | `eegfaktura-eda-xp` | https://github.com/eegfaktura/eegfaktura-eda-xp | Scala / Pekko |
 | `eegfaktura-admin-backend` | https://github.com/eegfaktura/eegfaktura-admin-backend | Scala / Pekko |
 | `eegfaktura-web` | https://github.com/eegfaktura/eegfaktura-web | React / Ionic |
 | `eegfaktura-admin` | https://github.com/eegfaktura/eegfaktura-admin | React |
+| `eegfaktura-keycloak` | https://github.com/eegfaktura/eegfaktura-keycloak | Keycloak image (realm, theme) |
 | `eegfaktura-docker-compose` | https://github.com/eegfaktura/eegfaktura-docker-compose | local dev stack |
 
 All service repositories are public and licensed under AGPL-3.0.
