@@ -13,12 +13,13 @@ This page is the reference for the import template: which column ends up
 where, which defaults apply, and how re-imports behave.
 
 **Current template:**
-[:material-download: 260716-vorlage-import-stammdaten.xlsx](../assets/260716-vorlage-import-stammdaten.xlsx)
-— the cleaned successor of `250310-vorlage-import-stammdaten.xlsx`. It contains
-only columns the importer actually reads; the import matches **header names,
-not column positions**, so older templates keep working. The same file lives as
-a pinned regression fixture in the backend repo
-(`tests/260716-vorlage-import-stammdaten.xlsx`).
+[:material-download: 261124-vorlage-import-stammdaten.xlsx](../assets/261124-vorlage-import-stammdaten.xlsx)
+— the `260716` template (the cleaned successor of `250310`) plus the columns
+Einzugsart, MandatRef, MandatDat, Mitgliedstarif and Zp. Tarifname (AB–AF). It
+contains only columns the importer actually reads; the import matches **header
+names, not column positions**, so older templates keep working. The same file
+lives as a pinned regression fixture in the backend repo
+(`tests/261124-vorlage-import-stammdaten.xlsx`).
 
 !!! info "Behavior by backend version"
     The date handling ("Mitglied seit", "registriert seit"), the
@@ -29,6 +30,8 @@ a pinned regression fixture in the backend repo
     "Mitglied seit" to the import day, dropped date-formatted cells and always
     imported 100 % participation. Since **1.2.0** "Netzbetreiber" is optional
     and only compared; since **1.3.0** the optional "Einzugsart" column is read.
+    Since **1.21.0** the optional tariff columns are read, and an empty
+    "MandatRef" or a blank "UmsatzsteuerNr" is stored as empty (NULL).
 
 ## Template structure
 
@@ -46,7 +49,7 @@ a pinned regression fixture in the backend repo
 ## Field reference
 
 The import matches columns by **header name** (letters below refer to the
-current `260716` template).
+current `261124` template).
 
 | Column | Imported as | Notes |
 |---|---|---|
@@ -63,14 +66,16 @@ current `260716` template).
 | BusinessRole (P) | `business` → `EEG_BUSINESS`, everything else → `EEG_PRIVATE` | |
 | Mitglied seit (Q) | member `participantSince` | `d.m.yyyy` text **or** a real Excel date cell; empty → import day. Legacy header `Dokument unterschrieben` still works |
 | IBAN / Kontoinhaber / Bankname (R–T) | member bank account | not validated |
-| Einzugsart (not in template) | member direct debit type | optional, header `DebitType` works too: `CORE`, `B2B`, `NONE` or `Kein SEPA` (case, blanks, hyphens ignored). Empty/missing → no type, the member is **not debited** (one warning `W_DEBIT_TYPE_DEFAULT` counts new members with an IBAN but no type); unknown value → warning `W_DEBIT_TYPE_UNKNOWN`; a different type on a later row of the same member → `W_DEBIT_TYPE_CONFLICT` |
-| MandatRef / MandatDat (not in template) | member SEPA mandate reference / date | optional; date as text or date cell |
+| Einzugsart (AB) | member direct debit type | optional, header `DebitType` works too: `CORE`, `B2B`, `NONE` or `Kein SEPA` (case, blanks, hyphens ignored). Empty/missing → no type, the member is **not debited** (one warning `W_DEBIT_TYPE_DEFAULT` counts new members with an IBAN but no type); unknown value → warning `W_DEBIT_TYPE_UNKNOWN`; a different type on a later row of the same member → `W_DEBIT_TYPE_CONFLICT` |
+| MandatRef / MandatDat (AC, AD) | member SEPA mandate reference / date | optional; date as text or date cell. An empty or blank "MandatRef" is stored as NULL (since 1.21.0; before an empty text), so billing uses the member number as mandate reference — the bank accepts it only as a valid SEPA mandate id (1–35 characters, no blanks or umlauts). A value is stored without surrounding blanks |
 | Email (U) | member e-mail | several addresses separated by `;` allowed; validated against the shared address rule; an invalid address is reported and the member imported **without** e-mail |
 | TelefonNr (V) | member phone | not validated |
-| UmsatzsteuerNr (X) | member VAT number | column W (`SteuerNr`) of the template is ignored |
+| UmsatzsteuerNr (X) | member VAT number | column W (`SteuerNr`) of the template is ignored. A cell with only blanks is stored as NULL (since 1.21.0; before, billing took the blanks as a VAT number) |
 | MitgliedsNr (Y) | member number | taken from the member's **first** row; a number used by several members in the file or already assigned to a *different* existing member is reported as a **warning** (rows still import) |
 | Zählpunktstatus (Z) | `ACTIVE` / `ACTIVATED` / `REGISTERED` → active member + active metering point; `NEW` → member and metering point process state `NEW`, metering point status `INIT` | case-insensitive, surrounding spaces tolerated; any other value rejects the row (reported) |
 | registriert seit (AA) | metering point `registeredSince` and `activeSince` | text or date cell; empty → Jan 1 of the current year. For **online** (EDA-connected) EEGs `registeredSince` is always the import day (`activeSince` still comes from this column) |
+| Mitgliedstarif (AE) | member tariff (type EEG) | optional (since 1.21.0). Name of an active tariff of the community (latest version, not archived), case-insensitive. Taken from the member's first non-empty cell; a different name on a later row → `W_TARIFF_CONFLICT`. Unknown name / other type / several matches → imported without tariff, `W_TARIFF_UNKNOWN` / `W_TARIFF_TYPE` / `W_TARIFF_AMBIGUOUS`. An existing member keeps its tariff (`W_TARIFF_MEMBER_EXISTS`). New members with a joining-fee tariff are counted once (`W_TARIFF_JOINING_FEE`): billing charges the fee with the first energy billing unless it is recorded as paid |
+| Zp. Tarifname (AF) | metering point tariff (VZP for consumption, EZP for generation) | optional (since 1.21.0), same lookup and warnings as Mitgliedstarif; also applied to new metering points of an existing member |
 
 **Not imported:** Columns from **older templates** without a data model
 counterpart (Ortsgebiet, Stiege/Stock/Tür/Adresszusatz, Überschusseinspeisung,
